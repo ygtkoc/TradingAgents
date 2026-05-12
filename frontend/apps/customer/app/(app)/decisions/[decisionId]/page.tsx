@@ -1,0 +1,571 @@
+"use client";
+
+import {
+  Badge, Button, Card, CardContent, CardDescription, CardHeader, CardTitle,
+  EmptyState, ErrorState, PageHeader, Skeleton,
+} from "@ta/ui";
+import { cn, formatCurrency, formatDateTime, formatRelative } from "@ta/utils";
+import {
+  ArrowLeft, Bot, Brain, ChevronRight, Clock, Shield, ShieldAlert,
+  ShieldCheck, Sparkles, TrendingUp, Zap,
+} from "lucide-react";
+import Link from "next/link";
+import { useParams } from "next/navigation";
+import { useEffect, useMemo, useState } from "react";
+
+import {
+  formatConfidenceCell, formatScoreCell,
+  getDecisionConfidence, getDecisionRationale,
+  getDecisionReasoning, getDecisionScore,
+} from "@/lib/decisions/summary";
+import {
+  useAgentOutputs, useDecisionAgentRuns, useSignal,
+  useTradeEventsForDecision, useTradeForDecision,
+} from "@/lib/hooks/queries/use-decision-detail";
+import { useDecision } from "@/lib/hooks/queries/use-decisions";
+
+// ── Agent icon + color map ───────────────────────────────────────────────────
+const AGENT_META: Record<string, { icon: typeof Bot; color: string; label: string }> = {
+  technical:  { icon: TrendingUp,  color: "text-primary  bg-primary/10  border-primary/20",  label: "Technical Analysis" },
+  price:      { icon: Sparkles,    color: "text-violet-400 bg-violet-400/10 border-violet-400/20", label: "Price Action" },
+  risk:       { icon: Shield,      color: "text-warning  bg-warning/10  border-warning/20",  label: "Risk Manager" },
+  sentiment:  { icon: Brain,       color: "text-pink-400  bg-pink-400/10  border-pink-400/20", label: "Sentiment" },
+  cro:        { icon: ShieldAlert, color: "text-destructive bg-destructive/10 border-destructive/20", label: "CRO / Security" },
+};
+
+function agentMeta(name: string): { icon: typeof Bot; color: string; label: string } {
+  const lower = name.toLowerCase();
+  if (lower.includes("technical") || lower.includes("analysis")) return AGENT_META.technical!;
+  if (lower.includes("price") || lower.includes("action"))       return AGENT_META.price!;
+  if (lower.includes("risk"))                                    return AGENT_META.risk!;
+  if (lower.includes("sentiment") || lower.includes("news"))     return AGENT_META.sentiment!;
+  if (lower.includes("cro") || lower.includes("security"))       return AGENT_META.cro!;
+  return { icon: Zap, color: "text-sky-400 bg-sky-400/10 border-sky-400/20", label: name };
+}
+
+// ── Confidence ring (visual) ─────────────────────────────────────────────────
+function ConfidenceRing({ value }: { value: number | null }) {
+  if (value === null) return <span className="text-muted-foreground/50">—</span>;
+  const pct  = Math.round(value * 100);
+  const r    = 16;
+  const circ = 2 * Math.PI * r;
+  const dash = (pct / 100) * circ;
+  const color = pct >= 70 ? "#10b981" : pct >= 40 ? "#f59e0b" : "#ef4444";
+
+  return (
+    <div className="relative flex items-center justify-center">
+      <svg width="44" height="44" viewBox="0 0 44 44" className="-rotate-90">
+        <circle cx="22" cy="22" r={r} fill="none" stroke="currentColor"
+          strokeWidth="3" className="text-border/40" />
+        <circle cx="22" cy="22" r={r} fill="none" stroke={color}
+          strokeWidth="3" strokeLinecap="round"
+          strokeDasharray={`${dash} ${circ}`} />
+      </svg>
+      <span className="absolute text-[11px] font-bold tabular-nums text-foreground">
+        {pct}%
+      </span>
+    </div>
+  );
+}
+
+// ── Score bar ────────────────────────────────────────────────────────────────
+function ScoreBar({ score }: { score: number | null }) {
+  if (score === null) return <span className="text-muted-foreground/50 text-[12px]">—</span>;
+  const clamped  = Math.max(-100, Math.min(100, score));
+  const pct      = Math.abs(clamped) / 2; // each side is 50% of bar
+  const positive = clamped >= 0;
+
+  return (
+    <div className="flex items-center gap-2">
+      <div className="relative h-1.5 w-20 overflow-hidden rounded-full bg-border/40">
+        <div
+          className={cn(
+            "absolute h-full rounded-full transition-all",
+            positive ? "right-1/2 bg-success" : "left-1/2 bg-destructive",
+          )}
+          style={{ width: `${pct}%` }}
+        />
+        {/* Center line */}
+        <div className="absolute left-1/2 top-0 h-full w-px bg-border/60" />
+      </div>
+      <span className={cn(
+        "text-[12px] font-semibold tabular-nums",
+        positive ? "text-success" : score < 0 ? "text-destructive" : "text-muted-foreground",
+      )}>
+        {score > 0 ? "+" : ""}{Math.round(score)}
+      </span>
+    </div>
+  );
+}
+
+// ── Single agent vote card ────────────────────────────────────────────────────
+function AgentVoteCard({ output }: { output: Record<string, unknown> & { agent_name?: string; id?: string } }) {
+  const name      = String(output.agent_name ?? "Agent");
+  const meta      = agentMeta(name);
+  const Icon      = meta.icon;
+  const decision  = String((output.output as Record<string, unknown>)?.decision ?? "—");
+  const score     = numOrNull((output.output as Record<string, unknown>)?.score);
+  const conf      = numOrNull((output.output as Record<string, unknown>)?.confidence);
+  const reasoning = String((output.output as Record<string, unknown>)?.reasoning ?? "");
+  const veto      = Boolean((output.output as Record<string, unknown>)?.veto);
+  const [expanded, setExpanded] = useState(false);
+
+  return (
+    <div className={cn(
+      "relative overflow-hidden rounded-xl border bg-card/60 backdrop-blur-sm",
+      "transition-all duration-200",
+      veto ? "border-destructive/30 bg-destructive/5" : "border-border/50 hover:border-border",
+    )}>
+      {veto && (
+        <div className="absolute inset-x-0 top-0 h-[2px] bg-destructive" />
+      )}
+
+      <div className="flex items-start gap-3 p-4">
+        {/* Agent icon */}
+        <div className={cn(
+          "flex h-9 w-9 shrink-0 items-center justify-center rounded-xl border",
+          meta.color,
+        )}>
+          <Icon className="h-4 w-4" />
+        </div>
+
+        <div className="flex-1 min-w-0">
+          {/* Agent name + decision */}
+          <div className="flex items-center gap-2 flex-wrap">
+            <span className="text-[13px] font-semibold text-foreground">{meta.label}</span>
+            <span className={cn(
+              "rounded-full px-2 py-0.5 text-[11px] font-semibold",
+              decision === "wait"   ? "bg-secondary text-muted-foreground"
+              : decision.includes("open_long")  ? "bg-success/15 text-success"
+              : decision.includes("open_short") ? "bg-destructive/15 text-destructive"
+              : "bg-secondary text-foreground",
+            )}>
+              {decision.replace(/_/g, " ")}
+            </span>
+            {veto && (
+              <Badge variant="destructive" className="text-[10px]">
+                <ShieldAlert className="h-2.5 w-2.5" /> veto
+              </Badge>
+            )}
+          </div>
+
+          {/* Score + Confidence */}
+          <div className="mt-2 flex items-center gap-4 flex-wrap">
+            <div className="flex flex-col gap-0.5">
+              <span className="text-[9px] uppercase tracking-[0.12em] text-muted-foreground/60">Score</span>
+              <ScoreBar score={score} />
+            </div>
+            <div className="flex flex-col gap-0.5">
+              <span className="text-[9px] uppercase tracking-[0.12em] text-muted-foreground/60">Confidence</span>
+              <ConfidenceRing value={conf} />
+            </div>
+          </div>
+        </div>
+      </div>
+
+      {/* Reasoning (collapsible) */}
+      {reasoning ? (
+        <div className="border-t border-border/20">
+          <button
+            onClick={() => setExpanded((p) => !p)}
+            className="flex w-full items-center justify-between px-4 py-2 text-[11px] text-muted-foreground/60 hover:text-foreground transition-colors"
+          >
+            <span>Reasoning</span>
+            <ChevronRight className={cn("h-3.5 w-3.5 transition-transform", expanded && "rotate-90")} />
+          </button>
+          {expanded && (
+            <div className="px-4 pb-4">
+              <p className="text-[12px] leading-relaxed text-muted-foreground whitespace-pre-wrap">
+                {reasoning}
+              </p>
+            </div>
+          )}
+        </div>
+      ) : null}
+    </div>
+  );
+}
+
+// ── Page ─────────────────────────────────────────────────────────────────────
+export default function DecisionDetailPage() {
+  const params     = useParams<{ decisionId: string }>();
+  const decisionId = params.decisionId;
+  const decisionQ  = useDecision(decisionId);
+  const decision   = decisionQ.data ?? null;
+  const signalQ    = useSignal(decision?.signal_id ?? null);
+  const runsQ      = useDecisionAgentRuns(decisionId, decision?.agent_run_id ?? null);
+  const primaryRun = runsQ.data?.[0] ?? null;
+  const outputsQ   = useAgentOutputs(primaryRun?.id ?? null);
+  const tradeQ     = useTradeForDecision(decisionId);
+  const eventsQ    = useTradeEventsForDecision(decisionId);
+
+  useEffect(() => {
+    if (decisionQ.isError)
+      console.error("decision.detail.load.failed", { decision_id: decisionId, error: decisionQ.error });
+  }, [decisionId, decisionQ.error, decisionQ.isError]);
+
+  if (decisionQ.isLoading) {
+    return (
+      <div className="mx-auto flex max-w-5xl flex-col gap-5">
+        <Skeleton className="h-9 w-72 rounded-xl" />
+        <Skeleton className="h-40 w-full rounded-2xl" />
+        <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
+          {[...Array(5)].map((_, i) => <Skeleton key={i} className="h-44 rounded-xl" />)}
+        </div>
+      </div>
+    );
+  }
+
+  if (decisionQ.isError) {
+    return (
+      <div className="mx-auto max-w-3xl">
+        <ErrorState
+          title="Could not load decision"
+          message={String((decisionQ.error as Error)?.message ?? "")}
+          onRetry={() => void decisionQ.refetch()}
+        />
+      </div>
+    );
+  }
+
+  if (!decision) {
+    return (
+      <div className="mx-auto max-w-3xl">
+        <EmptyState
+          title="Decision not found"
+          description={`No record for id ${decisionId}`}
+        />
+      </div>
+    );
+  }
+
+  const score      = getDecisionScore(decision);
+  const confidenceRaw = getDecisionConfidence(decision);
+  const confidence = num(confidenceRaw);
+  const rationale  = getDecisionRationale(decision) ?? getDecisionReasoning(decision);
+
+  const isWarmingUp = decision.metadata?.warming_up === true;
+  const isReject    = decision.final_decision === "reject" ||
+                      decision.approval_status === "rejected" ||
+                      decision.execution_status === "skipped";
+  const isExecuted  = decision.execution_status === "executed" || !!decision.linked_trade_id;
+
+  const warmupHave = num(decision.metadata?.candles_available);
+  const warmupNeed = num(decision.metadata?.candles_required);
+
+  const outcomeColor = isWarmingUp ? "border-warning/20  bg-warning/5"
+    : isReject ? "border-destructive/20 bg-destructive/5"
+    : isExecuted ? "border-success/20  bg-success/5"
+    : "border-border/50 bg-card/60";
+
+  const OutcomeIcon = isWarmingUp ? Clock : isReject ? ShieldAlert : ShieldCheck;
+  const outcomeIconColor = isWarmingUp ? "text-warning" : isReject ? "text-destructive" : "text-success";
+
+  return (
+    <div className="mx-auto flex max-w-5xl flex-col gap-5">
+      {/* ── Header ─────────────────────────────────────────────────────────── */}
+      <PageHeader
+        title={`${decision.symbol} · ${decision.final_decision.replace(/_/g, " ")}`}
+        description={`Decision recorded ${formatDateTime(decision.created_at)}`}
+        actions={
+          <div className="flex flex-wrap items-center gap-2">
+            {isWarmingUp ? <Badge variant="warning"><Clock className="h-3 w-3" /> warming up</Badge> : null}
+            {isExecuted  ? <Badge variant="success">executed</Badge> : null}
+            {isReject    ? <Badge variant="destructive">rejected</Badge> : null}
+            <Badge variant="secondary">{decision.mode}</Badge>
+            <Link href="/decisions">
+              <Button size="sm" variant="outline" className="gap-1.5">
+                <ArrowLeft className="h-3.5 w-3.5" /> All decisions
+              </Button>
+            </Link>
+          </div>
+        }
+      />
+
+      {/* ── Outcome hero card ───────────────────────────────────────────────── */}
+      <div className={cn(
+        "relative overflow-hidden rounded-2xl border p-6 backdrop-blur-sm",
+        outcomeColor,
+      )}>
+        <div className="flex items-start gap-4">
+          <div className={cn(
+            "flex h-12 w-12 shrink-0 items-center justify-center rounded-2xl border",
+            isWarmingUp ? "border-warning/20 bg-warning/10"
+            : isReject  ? "border-destructive/20 bg-destructive/10"
+            : "border-success/20 bg-success/10",
+          )}>
+            <OutcomeIcon className={cn("h-6 w-6", outcomeIconColor)} />
+          </div>
+          <div className="flex-1 min-w-0">
+            <div className="text-[15px] font-bold text-foreground">
+              {isWarmingUp ? "Bot is warming up"
+               : isReject ? "Signal rejected"
+               : isExecuted ? `Opened ${decision.final_decision.replace(/_/g, " ")}`
+               : `Decision: ${decision.final_decision.replace(/_/g, " ")}`}
+            </div>
+            {isWarmingUp && warmupHave != null && warmupNeed != null ? (
+              <div className="mt-2 space-y-2">
+                <p className="text-[13px] text-muted-foreground">
+                  Needs {warmupNeed} candles, {warmupHave} collected so far. Resumes automatically.
+                </p>
+                <div className="flex items-center gap-3">
+                  <div className="h-1.5 flex-1 overflow-hidden rounded-full bg-border/40">
+                    <div
+                      className="h-full rounded-full bg-warning transition-all"
+                      style={{ width: `${Math.min(100, (warmupHave / warmupNeed) * 100).toFixed(1)}%` }}
+                    />
+                  </div>
+                  <span className="shrink-0 text-[11px] tabular-nums text-muted-foreground">
+                    {warmupHave}/{warmupNeed}
+                  </span>
+                </div>
+              </div>
+            ) : rationale ? (
+              <p className="mt-1 text-[13px] leading-relaxed text-muted-foreground">{rationale}</p>
+            ) : null}
+          </div>
+          {/* Score + Confidence on the right */}
+          <div className="flex shrink-0 flex-col items-end gap-3">
+            <div className="text-right">
+              <div className="text-[9px] uppercase tracking-[0.12em] text-muted-foreground/60">Score</div>
+              <div className={cn(
+                "text-xl font-bold tabular-nums",
+                (score ?? 0) > 0 ? "text-success" : (score ?? 0) < 0 ? "text-destructive" : "text-foreground",
+              )}>
+                {score != null ? (score > 0 ? "+" : "") + Math.round(score) : "—"}
+              </div>
+            </div>
+            {confidence != null && <ConfidenceRing value={confidence} />}
+          </div>
+        </div>
+
+        {/* Meta fields */}
+        <div className="mt-4 grid grid-cols-2 gap-3 border-t border-border/20 pt-4 text-[12px] sm:grid-cols-4">
+          <MetaField label="Direction"   value={decision.direction} />
+          <MetaField label="Symbol"      value={<span className="font-mono">{decision.symbol}</span>} />
+          <MetaField label="Approval"    value={decision.approval_status.replace(/_/g, " ")} />
+          <MetaField label="Execution"   value={decision.execution_status.replace(/_/g, " ")} />
+          {decision.linked_trade_id ? (
+            <div className="col-span-2 sm:col-span-4">
+              <span className="text-[9px] uppercase tracking-[0.12em] text-muted-foreground/60">Linked trade</span>
+              <Link
+                href={`/trades/${decision.linked_trade_id}`}
+                className="ml-2 font-mono text-primary underline-offset-4 hover:underline"
+              >
+                {decision.linked_trade_id.slice(0, 12)}…
+              </Link>
+            </div>
+          ) : null}
+        </div>
+      </div>
+
+      {/* ── Agent voting panel ──────────────────────────────────────────────── */}
+      <div>
+        <div className="mb-3 flex items-center gap-2">
+          <h2 className="text-[15px] font-semibold text-foreground">Agent votes</h2>
+          <span className="text-[12px] text-muted-foreground">
+            {runsQ.isLoading ? "…" : `${(outputsQ.data ?? []).length} agents`}
+          </span>
+        </div>
+
+        {runsQ.isLoading ? (
+          <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
+            {[...Array(4)].map((_, i) => <Skeleton key={i} className="h-40 rounded-xl" />)}
+          </div>
+        ) : !primaryRun ? (
+          <EmptyState title="No agent run found" description="No pipeline data recorded for this decision." />
+        ) : (
+          <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
+            {(outputsQ.data ?? []).map((o) => (
+              <AgentVoteCard key={o.id} output={{ ...o, agent_name: o.agent_name ?? undefined }} />
+            ))}
+          </div>
+        )}
+      </div>
+
+      {/* ── Risk / Security / Veto summaries ───────────────────────────────── */}
+      <div className="grid gap-4 lg:grid-cols-3">
+        <SummaryCard title="Risk checks"     summary={decision.risk_summary as Record<string, unknown> | null} />
+        <SummaryCard title="Security checks" summary={decision.security_summary as Record<string, unknown> | null} />
+        <SummaryCard title="Veto"            summary={decision.veto_summary as Record<string, unknown> | null} />
+      </div>
+
+      {/* ── Signal + Trade ──────────────────────────────────────────────────── */}
+      <div className="grid gap-4 lg:grid-cols-2">
+        <Card>
+          <CardHeader>
+            <CardTitle>Source signal</CardTitle>
+            <CardDescription>The signal that triggered this pipeline run.</CardDescription>
+          </CardHeader>
+          <CardContent>
+            {signalQ.isLoading ? <Skeleton className="h-24 w-full rounded-lg" />
+            : !signalQ.data ? <EmptyState title="No signal recorded" />
+            : (
+              <div className="grid gap-2 text-[13px] sm:grid-cols-2">
+                {(() => {
+                  const sig = signalQ.data as unknown as Record<string, unknown>;
+                  return (
+                    <>
+                      <MetaField label="Symbol"    value={<span className="font-mono">{signalQ.data.symbol}</span>} />
+                      <MetaField label="Direction" value={sig.direction != null ? String(sig.direction) : "—"} />
+                      <MetaField label="Type"      value={signalQ.data.signal_type} />
+                      <MetaField label="Status"    value={sig.status != null ? String(sig.status) : "—"} />
+                      <MetaField label="Created"   value={formatRelative(signalQ.data.created_at)} />
+                    </>
+                  );
+                })()}
+              </div>
+            )}
+          </CardContent>
+        </Card>
+
+        <Card>
+          <CardHeader>
+            <CardTitle>Resulting trade</CardTitle>
+            <CardDescription>If the decision opened a position.</CardDescription>
+          </CardHeader>
+          <CardContent>
+            {tradeQ.isLoading ? <Skeleton className="h-24 w-full rounded-lg" />
+            : !tradeQ.data ? (
+              <EmptyState
+                title="No trade opened"
+                description={isReject ? "Decision rejected — no trade created." : "No trade linked yet."}
+              />
+            ) : (
+              <div className="space-y-3 text-[13px]">
+                <Link
+                  href={`/trades/${tradeQ.data.id}`}
+                  className="flex items-center justify-between rounded-lg border border-border/50 bg-card/60 px-3 py-2 hover:border-primary/30 transition-colors"
+                >
+                  <span className="font-mono text-[12px] text-muted-foreground">
+                    {tradeQ.data.id.slice(0, 16)}…
+                  </span>
+                  <ChevronRight className="h-4 w-4 text-muted-foreground" />
+                </Link>
+                <div className="grid gap-2 sm:grid-cols-2">
+                  <MetaField label="Status"      value={tradeQ.data.status} />
+                  <MetaField label="Entry price" value={formatCurrency(tradeQ.data.entry_price)} />
+                  <MetaField label="P&L"         value={
+                    tradeQ.data.realized_pnl != null ? formatCurrency(tradeQ.data.realized_pnl)
+                    : tradeQ.data.unrealized_pnl != null ? `${formatCurrency(tradeQ.data.unrealized_pnl)} (open)` : "—"
+                  } />
+                </div>
+              </div>
+            )}
+          </CardContent>
+        </Card>
+      </div>
+
+      {/* ── Lifecycle events ────────────────────────────────────────────────── */}
+      {(eventsQ.data ?? []).length > 0 ? (
+        <Card>
+          <CardHeader>
+            <CardTitle>Lifecycle events</CardTitle>
+            <CardDescription>Events tied to this decision in chronological order.</CardDescription>
+          </CardHeader>
+          <CardContent>
+            <ol className="space-y-2">
+              {eventsQ.data!.map((e) => (
+                <li key={e.id} className="flex items-start justify-between gap-3 rounded-xl border border-border/40 bg-card/40 px-4 py-3 text-[13px]">
+                  <div>
+                    <div className="font-medium">{e.event_type}</div>
+                    {Object.keys(e.metadata ?? {}).length > 0 ? (
+                      <p className="mt-0.5 line-clamp-1 font-mono text-[11px] text-muted-foreground">
+                        {JSON.stringify(e.metadata)}
+                      </p>
+                    ) : null}
+                  </div>
+                  <span className="shrink-0 text-[11px] text-muted-foreground">
+                    {formatRelative(e.created_at)}
+                  </span>
+                </li>
+              ))}
+            </ol>
+          </CardContent>
+        </Card>
+      ) : null}
+
+      {/* ── Raw JSON (collapsible) ───────────────────────────────────────────── */}
+      <CollapsibleJson title="Raw decision row" data={decision} />
+      {primaryRun ? <CollapsibleJson title="Raw agent run" data={primaryRun} /> : null}
+    </div>
+  );
+}
+
+// ── Helpers ───────────────────────────────────────────────────────────────────
+
+function num(value: unknown): number | null {
+  if (typeof value === "number" && Number.isFinite(value)) return value;
+  if (typeof value === "string") { const n = Number(value); if (Number.isFinite(n)) return n; }
+  return null;
+}
+
+function numOrNull(value: unknown): number | null { return num(value); }
+
+function MetaField({ label, value }: { label: string; value: React.ReactNode }) {
+  return (
+    <div>
+      <div className="text-[9px] font-semibold uppercase tracking-[0.12em] text-muted-foreground/60">{label}</div>
+      <div className="mt-0.5 text-[13px] text-foreground">{value}</div>
+    </div>
+  );
+}
+
+function SummaryCard({ title, summary }: { title: string; summary: Record<string, unknown> | null | undefined }) {
+  const entries = useMemo(() => {
+    if (!summary) return [];
+    return Object.entries(summary).filter(
+      ([, v]) => typeof v === "string" || typeof v === "number" || typeof v === "boolean"
+    );
+  }, [summary]);
+
+  return (
+    <Card>
+      <CardHeader className="pb-3">
+        <CardTitle className="text-[13px]">{title}</CardTitle>
+      </CardHeader>
+      <CardContent>
+        {!summary || entries.length === 0 ? (
+          <div className="text-[12px] text-muted-foreground/50">No data recorded</div>
+        ) : (
+          <ul className="space-y-1.5">
+            {entries.map(([k, v]) => (
+              <li key={k} className="flex items-baseline justify-between gap-2">
+                <span className="text-[10px] uppercase tracking-wider text-muted-foreground/60">
+                  {k.replace(/_/g, " ")}
+                </span>
+                <span className={cn(
+                  "text-right font-mono text-[11px]",
+                  v === true ? "text-success" : v === false ? "text-destructive" : "text-foreground",
+                )}>
+                  {String(v)}
+                </span>
+              </li>
+            ))}
+          </ul>
+        )}
+      </CardContent>
+    </Card>
+  );
+}
+
+function CollapsibleJson({ title, data }: { title: string; data: unknown }) {
+  const [open, setOpen] = useState(false);
+  return (
+    <Card>
+      <CardHeader className="flex flex-row items-center justify-between space-y-0 py-3">
+        <CardTitle className="text-[13px] text-muted-foreground">{title}</CardTitle>
+        <Button size="sm" variant="ghost" className="h-7 text-[11px]" onClick={() => setOpen((o) => !o)}>
+          {open ? "Hide" : "Show"} raw
+        </Button>
+      </CardHeader>
+      {open ? (
+        <CardContent>
+          <pre className="max-h-96 overflow-auto rounded-xl bg-muted/30 p-4 text-[11px] leading-relaxed text-muted-foreground">
+            {JSON.stringify(data, null, 2)}
+          </pre>
+        </CardContent>
+      ) : null}
+    </Card>
+  );
+}

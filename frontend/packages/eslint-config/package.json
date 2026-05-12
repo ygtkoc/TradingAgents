@@ -1,0 +1,17 @@
+{
+  "name": "@ta/eslint-config",
+  "version": "0.0.0",
+  "private": true,
+  "main": "index.cjs",
+  "files": ["index.cjs", "next.cjs", "library.cjs"],
+  "dependencies": {
+    "@typescript-eslint/eslint-plugin": "^8.7.0",
+    "@typescript-eslint/parser":        "^8.7.0",
+    "eslint":                           "^8.57.1",
+    "eslint-config-next":               "^14.2.13",
+    "eslint-config-prettier":           "^9.1.0",
+    "eslint-plugin-import":             "^2.30.0",
+    "eslint-plugin-react":              "^7.36.1",
+    "eslint-plugin-react-hooks":        "^4.6.2"
+  }
+}

@@ -1,0 +1,2 @@
+/* App-specific overrides only. Shared theme (CSS vars + tailwind base)
+   is imported via JS in `app/layout.tsx` from `@ta/ui/styles.css`. */

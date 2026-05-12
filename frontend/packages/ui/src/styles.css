@@ -1,0 +1,185 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  :root {
+    /* ── Light (fallback only — app is dark-first) ────────────────────────── */
+    --background:        220 15% 97%;
+    --foreground:        220 20% 10%;
+
+    --card:              0 0% 100%;
+    --card-foreground:   220 20% 10%;
+
+    --primary:           217 91% 55%;
+    --primary-foreground:0 0% 100%;
+
+    --secondary:         220 14% 93%;
+    --secondary-foreground:220 20% 10%;
+
+    --muted:             220 14% 93%;
+    --muted-foreground:  220 10% 48%;
+
+    --accent:            217 91% 96%;
+    --accent-foreground: 217 91% 30%;
+
+    --destructive:       0 84% 58%;
+    --destructive-foreground:0 0% 100%;
+
+    --success:           158 64% 40%;
+    --success-foreground:0 0% 100%;
+
+    --warning:           36 95% 50%;
+    --warning-foreground:0 0% 0%;
+
+    --border:            220 14% 88%;
+    --input:             220 14% 88%;
+    --ring:              217 91% 55%;
+
+    --radius:            0.625rem;
+
+    /* ── Chart colors ─────────────────────────────────────────────────────── */
+    --chart-bull:        158 64% 40%;
+    --chart-bear:        0 84% 58%;
+    --chart-neutral:     220 10% 48%;
+    --chart-primary:     217 91% 55%;
+  }
+
+  .dark {
+    /* ── Deep dark fintech palette ─────────────────────────────────────────── */
+    /* Backgrounds */
+    --background:        222 18% 5%;        /* #080b11 — near-black with blue tint */
+    --foreground:        210 30% 94%;       /* #edf2f7 — warm white */
+
+    /* Cards — slightly lighter than background, glasslike */
+    --card:              220 16% 8%;        /* #0e1219 */
+    --card-foreground:   210 30% 94%;
+
+    /* Primary — neon blue (Binance/Vercel accent) */
+    --primary:           214 100% 62%;      /* #3d9ef7 */
+    --primary-foreground:220 18% 5%;
+
+    /* Secondary — graphite */
+    --secondary:         220 15% 14%;       /* #1c2232 */
+    --secondary-foreground:210 25% 88%;
+
+    /* Muted — medium graphite */
+    --muted:             220 15% 13%;
+    --muted-foreground:  215 16% 55%;       /* #7b8fa8 */
+
+    /* Accent — subtle blue wash */
+    --accent:            217 35% 16%;
+    --accent-foreground: 210 30% 94%;
+
+    /* Destructive — vivid red */
+    --destructive:       0 72% 55%;         /* #dc3545 */
+    --destructive-foreground:0 0% 100%;
+
+    /* Success — emerald green */
+    --success:           158 72% 42%;       /* #0fa172 */
+    --success-foreground:0 0% 100%;
+
+    /* Warning — amber */
+    --warning:           36 97% 52%;        /* #f59e0b */
+    --warning-foreground:220 18% 5%;
+
+    /* Borders — subtle, barely visible */
+    --border:            220 16% 16%;       /* #1e2738 */
+    --input:             220 16% 16%;
+    --ring:              214 100% 62%;
+
+    --radius:            0.625rem;
+
+    /* Chart */
+    --chart-bull:        158 72% 42%;
+    --chart-bear:        0 72% 55%;
+    --chart-neutral:     215 16% 55%;
+    --chart-primary:     214 100% 62%;
+  }
+
+  * { @apply border-border; }
+
+  body {
+    @apply bg-background text-foreground antialiased;
+    font-feature-settings: "cv02", "cv03", "cv04", "cv11";
+  }
+
+  /* ── Premium scrollbar ─────────────────────────────────────────────────── */
+  ::-webkit-scrollbar { width: 6px; height: 6px; }
+  ::-webkit-scrollbar-track { background: transparent; }
+  ::-webkit-scrollbar-thumb {
+    background: hsl(var(--border));
+    border-radius: 999px;
+  }
+  ::-webkit-scrollbar-thumb:hover {
+    background: hsl(var(--muted-foreground) / 0.4);
+  }
+
+  /* ── Tabular numbers for financial data ────────────────────────────────── */
+  .tabular-nums { font-variant-numeric: tabular-nums; }
+}
+
+@layer utilities {
+  /* Glass card effect */
+  .glass {
+    backdrop-filter: blur(12px) saturate(1.4);
+    -webkit-backdrop-filter: blur(12px) saturate(1.4);
+    background-color: hsl(var(--card) / 0.7);
+    border: 1px solid hsl(var(--border) / 0.6);
+  }
+
+  .glass-strong {
+    backdrop-filter: blur(20px) saturate(1.6);
+    -webkit-backdrop-filter: blur(20px) saturate(1.6);
+    background-color: hsl(var(--card) / 0.85);
+    border: 1px solid hsl(var(--border) / 0.8);
+  }
+
+  /* Glow effects */
+  .glow-primary   { box-shadow: 0 0 20px hsl(var(--primary) / 0.25); }
+  .glow-success   { box-shadow: 0 0 20px hsl(var(--success) / 0.25); }
+  .glow-danger    { box-shadow: 0 0 20px hsl(var(--destructive) / 0.25); }
+
+  /* Gradient text */
+  .text-gradient-primary {
+    background: linear-gradient(135deg, hsl(var(--primary)), hsl(214 100% 75%));
+    -webkit-background-clip: text;
+    -webkit-text-fill-color: transparent;
+    background-clip: text;
+  }
+
+  /* Animated pulse dot */
+  .live-dot::before {
+    content: '';
+    display: inline-block;
+    width: 6px;
+    height: 6px;
+    border-radius: 50%;
+    background: hsl(var(--success));
+    box-shadow: 0 0 0 0 hsl(var(--success) / 0.6);
+    animation: pulse-ring 2s cubic-bezier(0.455, 0.03, 0.515, 0.955) infinite;
+  }
+
+  @keyframes pulse-ring {
+    0%   { box-shadow: 0 0 0 0 hsl(var(--success) / 0.6); }
+    70%  { box-shadow: 0 0 0 6px hsl(var(--success) / 0); }
+    100% { box-shadow: 0 0 0 0 hsl(var(--success) / 0); }
+  }
+
+  /* Grid shimmer for loading */
+  .shimmer {
+    background: linear-gradient(
+      90deg,
+      hsl(var(--muted)) 25%,
+      hsl(var(--muted-foreground) / 0.05) 50%,
+      hsl(var(--muted)) 75%
+    );
+    background-size: 200% 100%;
+    animation: shimmer 1.5s infinite;
+  }
+
+  @keyframes shimmer {
+    0%   { background-position: -200% 0; }
+    100% { background-position:  200% 0; }
+  }
+}

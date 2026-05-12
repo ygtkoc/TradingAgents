@@ -1,0 +1,5 @@
+{
+  "extends": "@ta/tsconfig/base.json",
+  "compilerOptions": { "jsx": "preserve" },
+  "include": ["src/**/*"]
+}
