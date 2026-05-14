@@ -56,14 +56,24 @@ const columns: ColumnDef<Trade, unknown>[] = [
     header: "P&L",
     cell: ({ row }) => {
       const t   = row.original;
-      const pnl = t.realized_pnl ?? t.unrealized_pnl ?? 0;
+      const pnl = t.status === "open"
+        ? t.unrealized_pnl ?? t.pnl ?? 0
+        : t.realized_pnl ?? t.pnl ?? 0;
+      const pct = t.pnl_pct != null ? Number(t.pnl_pct) : null;
       return (
         <div className={cn(
-          "flex items-center gap-0.5 font-semibold tabular-nums text-[13px]",
+          "flex flex-col font-semibold tabular-nums text-[13px]",
           pnl > 0 ? "text-success" : pnl < 0 ? "text-destructive" : "text-foreground",
         )}>
-          {pnl > 0 ? <ArrowUpRight className="h-3.5 w-3.5" /> : pnl < 0 ? <ArrowDownRight className="h-3.5 w-3.5" /> : null}
-          {pnl >= 0 ? "+" : ""}{formatCurrency(pnl)}
+          <span className="flex items-center gap-0.5">
+            {pnl > 0 ? <ArrowUpRight className="h-3.5 w-3.5" /> : pnl < 0 ? <ArrowDownRight className="h-3.5 w-3.5" /> : null}
+            {pnl >= 0 ? "+" : ""}{formatCurrency(pnl)}
+          </span>
+          {pct != null ? (
+            <span className="text-[10px] font-medium opacity-70">
+              {pct >= 0 ? "+" : ""}{pct.toFixed(2)}%
+            </span>
+          ) : null}
         </div>
       );
     },

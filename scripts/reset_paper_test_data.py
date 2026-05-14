@@ -28,8 +28,8 @@ from pathlib import Path
 # ── Tables wiped (children before parents) ──────────────────────────────────
 RUNTIME_TABLES: list[str] = [
     "trade_events",
-    "trades",
     "trade_decisions",
+    "trades",
     "agent_outputs",
     "agent_runs",
     "signals",
@@ -131,7 +131,9 @@ def main() -> None:
                 "balance":         a.get("starting_balance", 1000),
                 "realized_pnl":    0,
                 "unrealized_pnl":  0,
-                "equity":          a.get("starting_balance", 1000),
+                "status":          "paused",
+                "started_at":      None,
+                "paused_at":       None,
             }).eq("id", a["id"]).execute()
         print(f"[reset] paper_accounts        {len(accts):>6} reset to starting_balance")
     except Exception as exc:

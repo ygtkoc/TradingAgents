@@ -62,7 +62,7 @@ class TradeLifecycleRepository:
         Phase 1: SELECT IDs of open trades eligible for lifecycle monitoring.
 
         Eligible:
-          - status = 'open'
+          - status IN ('pending', 'open')
           - lifecycle_status IN ('idle', 'needs_reconciliation')
 
         Non-locking — safe to call concurrently from multiple workers.
@@ -71,7 +71,7 @@ class TradeLifecycleRepository:
             return (
                 self._client.table("trades")
                 .select("id")
-                .eq("status", "open")
+                .in_("status", ["pending", "open"])
                 .in_("lifecycle_status", ["idle", "needs_reconciliation"])
                 .order("created_at", desc=False)
                 .limit(limit)
@@ -94,7 +94,7 @@ class TradeLifecycleRepository:
             lifecycle_claimed_at=now(),
             lifecycle_last_checked_at=now()
         WHERE id=trade_id
-          AND status='open'
+          AND status IN ('pending','open')
           AND lifecycle_status IN ('idle','needs_reconciliation')
         RETURNING *;
 
@@ -112,7 +112,7 @@ class TradeLifecycleRepository:
                     "lifecycle_last_checked_at": now,
                 })
                 .eq("id", trade_id)
-                .eq("status", "open")
+                .in_("status", ["pending", "open"])
                 .in_("lifecycle_status", ["idle", "needs_reconciliation"])
                 .execute()
             )
@@ -235,6 +235,8 @@ class TradeLifecycleRepository:
         realized_pnl:   float,
         close_reason:   str,
         close_order_id: Optional[str] = None,
+        pnl_pct:        Optional[float] = None,
+        r_multiple:     Optional[float] = None,
     ) -> Optional[Trade]:
         """Mark a trade as fully closed."""
         if settings.dry_run:
@@ -256,6 +258,8 @@ class TradeLifecycleRepository:
                     "avg_exit_price":   avg_exit_price,
                     "realized_pnl":     realized_pnl,
                     "pnl":              realized_pnl,
+                    "pnl_pct":          pnl_pct,
+                    "r_multiple":       r_multiple,
                     "unrealized_pnl":   None,
                     "close_reason":     close_reason,
                     "close_order_id":   close_order_id,

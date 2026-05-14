@@ -239,7 +239,30 @@ export function usePaperAccountMutations() {
   const reset = useMutation({
     mutationFn: async (startingBalance?: number) => {
       if (!user?.id) throw new Error("Not signed in.");
-      console.info("paper.reset.start", { user_id: user.id });
+      const requestedBalance = Number(startingBalance);
+      const newStartingBalance =
+        Number.isFinite(requestedBalance) && requestedBalance > 0
+          ? requestedBalance
+          : undefined;
+      console.info("paper.reset.start", { user_id: user.id, starting_balance: newStartingBalance });
+
+      let efErr: unknown = null;
+      try {
+        const result = await unwrap(
+          edgeFn.paperAccount.reset(
+            newStartingBalance != null ? { starting_balance: newStartingBalance } : {},
+          ),
+        );
+        console.info("paper.reset.edge", { phase: "success", user_id: user.id, summary: result });
+        return result;
+      } catch (err) {
+        efErr = err;
+        console.warn("paper.reset.edge", {
+          phase: "failed",
+          user_id: user.id,
+          error_message: (err as Error)?.message ?? String(err),
+        });
+      }
 
       // ── Try paper_reset() RPC first (works in dev + prod with authenticated client).
       // The function is SECURITY DEFINER + GRANT to authenticated, so no service_role needed.
@@ -249,10 +272,25 @@ export function usePaperAccountMutations() {
       if (!rpcErr) {
         console.info("paper.reset.success", { user_id: user.id, summary: rpcData });
         // If a new starting balance was requested, update it after reset.
-        if (startingBalance != null && startingBalance > 0) {
+        // Keep the account paused so the user can start the engine manually.
+        if (newStartingBalance != null) {
+          const { error: updateErr } = await supabase
+            .from("paper_accounts")
+            .update({
+              starting_balance: newStartingBalance,
+              balance:          newStartingBalance,
+              realized_pnl:     0,
+              unrealized_pnl:   0,
+              status:           "paused",
+              started_at:       null,
+              paused_at:        new Date().toISOString(),
+            })
+            .eq("user_id", user.id);
+          if (updateErr) throw updateErr;
+        } else {
           await supabase
             .from("paper_accounts")
-            .update({ starting_balance: startingBalance, balance: startingBalance, equity: startingBalance })
+            .update({ status: "paused", started_at: null, paused_at: new Date().toISOString() })
             .eq("user_id", user.id);
         }
         return rpcData;
@@ -265,40 +303,13 @@ export function usePaperAccountMutations() {
         message: rpcErr.message,
       });
 
-      const devOk = _devFallbackOk();
-      if (!devOk) {
-        throw new Error(
-          `Paper reset failed: ${rpcErr.message}\n\n` +
-          "Deploy migration 0013 to enable the paper_reset() function:\n" +
-          "  supabase db push",
-        );
-      }
-
-      console.warn("paper.reset.dev_fallback", { phase: "attempt", user_id: user.id });
-      const { data, error } = await supabase
-        .from("paper_accounts")
-        .update({
-          balance:          startingBalance ?? 1000,
-          starting_balance: startingBalance ?? 1000,
-          equity:           startingBalance ?? 1000,
-          realized_pnl:     0,
-          unrealized_pnl:   0,
-          status:           "inactive",
-          started_at:       null,
-          paused_at:        null,
-        })
-        .eq("user_id", user.id)
-        .select("id, balance, status, starting_balance")
-        .single();
-
-      if (error) {
-        console.error("paper.reset.dev_fallback", {
-          phase: "denied", user_id: user.id, code: error.code, message: error.message,
-        });
-        throw new Error(`Paper reset dev fallback denied (${error.code}): ${error.message}`);
-      }
-      console.info("paper.reset.dev_fallback", { phase: "success", user_id: user.id });
-      return { account_id: data.id, starting_balance: Number(data.starting_balance) };
+      throw new Error(
+        `Paper reset failed: ${rpcErr.message}\n\n` +
+        `Edge Function error: ${(efErr as Error)?.message ?? String(efErr)}\n\n` +
+        "A safe reset must delete paper trades and decisions atomically. Deploy/serve the reset backend first:\n" +
+        "  supabase db push\n" +
+        "  supabase functions serve --no-verify-jwt",
+      );
     },
     onSuccess: () => {
       console.info("paper.reset", { user_id: user?.id });

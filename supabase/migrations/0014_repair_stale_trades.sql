@@ -10,7 +10,7 @@
 --   inactive (i.e., user pressed Reset). This is a one-time repair + trigger.
 --
 -- FIX 2: Add a trigger that auto-cancels open paper trades when
---   paper_accounts.status transitions to 'inactive' (i.e., every reset).
+--   paper_accounts.status transitions to 'paused' (i.e., every reset).
 --
 -- FIX 3: Replace paper_reset() with a hardened version that also handles
 --   gracefully missing columns (warmup_status etc) via conditional DDL.
@@ -42,8 +42,8 @@ SECURITY DEFINER
 SET search_path = public, extensions
 AS $$
 BEGIN
-  -- Only fire when status changes FROM non-inactive TO inactive
-  IF NEW.status = 'inactive' AND OLD.status != 'inactive' THEN
+  -- Only fire when status changes FROM non-paused TO paused
+  IF NEW.status = 'paused' AND OLD.status != 'paused' THEN
     UPDATE public.trades
     SET
       status       = 'cancelled',
@@ -145,12 +145,11 @@ BEGIN
   UPDATE public.paper_accounts
   SET
     balance        = starting_balance,
-    equity         = starting_balance,
     realized_pnl   = 0,
     unrealized_pnl = 0,
-    status         = 'inactive',
+    status         = 'paused',
     started_at     = NULL,
-    paused_at      = NULL,
+    paused_at      = NOW(),
     updated_at     = NOW()
   WHERE user_id = p_user_id;
 

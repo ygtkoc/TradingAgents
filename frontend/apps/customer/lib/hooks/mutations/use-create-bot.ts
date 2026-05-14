@@ -10,6 +10,7 @@ export interface CreateBotInput {
   exchange:              "binance" | "bybit" | "coinbase";
   symbol:                string;
   mode:                  "paper" | "live";
+  trading_system:        "futures_trading" | "portfolio_management";
   strategy:              "momentum" | "trend_following" | "scalping" | "mean_reversion" | "balanced";
   risk_level:            "conservative" | "moderate" | "aggressive";
   /** Risk model: 'percentage' = % of balance, 'fixed_usd' = dollar amount. */
@@ -82,6 +83,7 @@ export function useCreateBot() {
         candles_collected:         0,
         metadata: {
           created_via:           "customer_ui",
+          trading_system:        input.trading_system,
           strategy:              input.strategy,
           risk_level:            input.risk_level,
           timeframe:             input.timeframe,

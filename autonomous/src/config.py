@@ -30,10 +30,12 @@ class Settings(BaseSettings):
 
     # ── Market data ───────────────────────────────────────────────────────────
     market_data_symbols:               str   = "BTCUSDT,ETHUSDT,SOLUSDT"
+    market_data_symbol_universe:       str   = "binance_all_usdt"
     market_data_kline_interval:        str   = "1m"
     market_data_rest_fallback_seconds: float = Field(default=30.0, ge=5.0)
     market_data_heartbeat_seconds:     float = Field(default=30.0, ge=5.0)
     market_data_stale_after_seconds:   float = Field(default=120.0, ge=30.0)
+    market_data_prefetch_concurrency:  int   = Field(default=12, ge=1, le=50)
     market_data_binance_ws_url:        str   = "wss://stream.binance.com:9443/stream"
     market_data_binance_rest_url:      str   = "https://api.binance.com"
 
@@ -43,12 +45,16 @@ class Settings(BaseSettings):
 
     # Minimum minutes between consecutive seeded signals per (bot, symbol),
     # keyed by strategy_type. Prevents spam and respects strategy cadence.
-    signal_cadence_scalping_m:     int = Field(default=2,  ge=1)
-    signal_cadence_momentum_m:     int = Field(default=10, ge=1)
-    signal_cadence_trend_m:        int = Field(default=30, ge=1)
-    signal_cadence_mean_reversion_m: int = Field(default=15, ge=1)
-    signal_cadence_balanced_m:     int = Field(default=15, ge=1)
-    signal_cadence_default_m:      int = Field(default=5,  ge=1)
+    signal_cadence_scalping_m:     int = Field(default=30,  ge=1)
+    signal_cadence_momentum_m:     int = Field(default=90,  ge=1)
+    signal_cadence_trend_m:        int = Field(default=240, ge=1)
+    signal_cadence_mean_reversion_m: int = Field(default=120, ge=1)
+    signal_cadence_balanced_m:     int = Field(default=180, ge=1)
+    signal_cadence_default_m:      int = Field(default=120, ge=1)
+    signal_scan_all_market_symbols: bool = False
+    signal_max_symbols_per_bot_tick: int = Field(default=10, ge=1, le=1000)
+    futures_min_signal_cadence_m:   int = Field(default=120, ge=1)
+    portfolio_min_signal_cadence_m: int = Field(default=360, ge=1)
 
     # ── Demo-bot bootstrap ────────────────────────────────────────────────────
     demo_bootstrap_enabled:          bool  = True

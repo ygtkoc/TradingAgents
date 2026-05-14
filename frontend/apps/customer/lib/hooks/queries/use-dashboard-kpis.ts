@@ -3,7 +3,7 @@
 import { useMemo } from "react";
 
 import { useBots } from "./use-bots";
-import { useTrades } from "./use-trades";
+import { isFilledPosition, useTrades } from "./use-trades";
 import { useDecisions } from "./use-decisions";
 import { useRiskLogs } from "./use-logs";
 
@@ -22,7 +22,7 @@ export function useDashboardKpis() {
 
   const kpis = useMemo(() => {
     const tradesData = trades.data ?? [];
-    const open  = tradesData.filter((t) => t.status === "open");
+    const open  = tradesData.filter(isFilledPosition);
     const realised = tradesData.reduce((s, t) => s + (t.realized_pnl ?? 0), 0);
     const unreal   = open.reduce((s, t) => s + (t.unrealized_pnl ?? 0), 0);
     const activeBots = (bots.data ?? []).filter((b) => b.status === "active").length;

@@ -73,6 +73,7 @@ export interface PaperAccountResetRequest   { starting_balance?: number }
 export interface PaperAccountResetResponse  {
   account_id: string;
   starting_balance: number;
+  status?: "paused";
   deleted: { signals: number; decisions: number; trades: number; events: number; account_events: number };
 }
 

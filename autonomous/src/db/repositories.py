@@ -117,6 +117,34 @@ class MarketSnapshotRepository:
         rows = result.data or []
         return rows[0] if rows else None
 
+    async def list_recent_symbols(
+        self,
+        exchange: str,
+        timeframe: str,
+        *,
+        since_minutes: int = 10,
+    ) -> list[str]:
+        cutoff = (
+            datetime.now(timezone.utc) - timedelta(minutes=since_minutes)
+        ).isoformat()
+
+        def _select():
+            return (
+                self._client.table("market_snapshots")
+                .select("symbol")
+                .eq("exchange", exchange)
+                .eq("timeframe", timeframe)
+                .gte("captured_at", cutoff)
+                .execute()
+            )
+        result = await _run(_select)
+        rows = result.data or []
+        return sorted({
+            str(row.get("symbol")).upper()
+            for row in rows
+            if row.get("symbol")
+        })
+
 
 # ── Signals ──────────────────────────────────────────────────────────────────
 

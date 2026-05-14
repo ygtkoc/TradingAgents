@@ -15,7 +15,7 @@ import { useState } from "react";
 
 import { useTrades } from "@/lib/hooks/queries/use-trades";
 
-type StatusFilter = "all" | "open" | "closed";
+type StatusFilter = "all" | "pending" | "open" | "closed";
 type ModeFilter   = "all" | TradeMode;
 
 const columns: ColumnDef<Trade, unknown>[] = [
@@ -119,16 +119,24 @@ const columns: ColumnDef<Trade, unknown>[] = [
     header: "P&L",
     cell: ({ row }) => {
       const t   = row.original;
-      const raw = t.realized_pnl ?? t.unrealized_pnl ?? t.pnl;
+      const raw = t.status === "open"
+        ? t.unrealized_pnl ?? t.pnl
+        : t.realized_pnl ?? t.pnl;
       if (raw == null) return <span className="text-muted-foreground">—</span>;
       const pnl = Number(raw);
+      const pct = t.pnl_pct != null ? Number(t.pnl_pct) : null;
       return (
-        <span className={cn(
-          "tabular-nums text-[13px] font-semibold",
+        <div className={cn(
+          "flex flex-col tabular-nums text-[13px] font-semibold",
           pnl > 0 ? "text-success" : pnl < 0 ? "text-destructive" : "text-foreground",
         )}>
-          {pnl >= 0 ? "+" : ""}{formatCurrency(pnl)}
-        </span>
+          <span>{pnl >= 0 ? "+" : ""}{formatCurrency(pnl)}</span>
+          {pct != null ? (
+            <span className="text-[10px] font-medium opacity-70">
+              {pct >= 0 ? "+" : ""}{pct.toFixed(2)}%
+            </span>
+          ) : null}
+        </div>
       );
     },
   },
@@ -165,6 +173,7 @@ export function TradesTable() {
           </SelectTrigger>
           <SelectContent>
             <SelectItem value="all">All status</SelectItem>
+            <SelectItem value="pending">Order stage</SelectItem>
             <SelectItem value="open">Open</SelectItem>
             <SelectItem value="closed">Closed</SelectItem>
           </SelectContent>

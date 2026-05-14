@@ -7,7 +7,7 @@ import asyncio
 import signal
 import sys
 import time
-from typing import Optional
+from typing import Any, Optional
 
 from src.config import settings
 from src.db.models import (
@@ -154,7 +154,11 @@ async def _persist_results(
             confidence=result.get("confidence", 0.0),
             veto=result.get("veto", False),
             reasoning=result.get("reasoning", "")[:2000],
-            output=result.get("output", {}),
+            output={
+                **(result.get("output") or {}),
+                "agent_name": result.get("agent_name"),
+                "agent_category": result.get("agent_category"),
+            },
             error_message=result.get("error"),
             duration_ms=result.get("duration_ms"),
             completed_at=utcnow_iso(),
@@ -365,6 +369,41 @@ def _is_risk_veto(veto_agent_name: str) -> bool:
     return "risk" in veto_agent_name.lower()
 
 
+def _bot_metadata(bot_dict: dict[str, Any], bot: "Bot") -> dict[str, Any]:
+    meta = bot_dict.get("metadata")
+    if isinstance(meta, dict):
+        return meta
+    return getattr(bot, "metadata", {}) or {}
+
+
+def _trading_system(bot_dict: dict[str, Any], bot: "Bot") -> str:
+    meta = _bot_metadata(bot_dict, bot)
+    return str(
+        meta.get("trading_system")
+        or meta.get("system")
+        or bot_dict.get("trading_system")
+        or "futures_trading"
+    )
+
+
+def _risk_profile(bot_dict: dict[str, Any], bot: "Bot") -> dict[str, float]:
+    if _trading_system(bot_dict, bot) == "portfolio_management":
+        return {
+            "max_risk_pct": 0.5,
+            "min_stop_pct": 3.0,
+            "max_stop_pct": 18.0,
+            "min_rr": 1.2,
+            "max_position_pct": min(float(bot.max_position_size_pct or 5.0), 3.0),
+        }
+    return {
+        "max_risk_pct": 2.0,
+        "min_stop_pct": 1.5,
+        "max_stop_pct": 12.0,
+        "min_rr": 2.0,
+        "max_position_pct": min(float(bot.max_position_size_pct or 10.0), 10.0),
+    }
+
+
 async def _execute_paper_trade(
     *,
     sig: Signal,
@@ -437,24 +476,38 @@ async def _execute_paper_trade(
         # ── Flexible risk model (migration 0012) ─────────────────────────────
         # Supports: percentage (% of balance) and fixed_usd (dollar amount).
         bot_dict_exec    = state.get("bot") or {}
+        trading_system   = _trading_system(bot_dict_exec, bot)
+        risk_profile     = _risk_profile(bot_dict_exec, bot)
         risk_model       = str(bot_dict_exec.get("risk_model") or "percentage")
         risk_value_raw   = bot_dict_exec.get("risk_value") or bot.risk_per_trade_pct or 2.0
         risk_value       = float(risk_value_raw)
-        risk_reward_ratio = float(bot_dict_exec.get("risk_reward_ratio") or bot.risk_reward_ratio or 2.0)
+        risk_reward_ratio = max(
+            float(bot_dict_exec.get("risk_reward_ratio") or bot.risk_reward_ratio or 2.0),
+            risk_profile["min_rr"],
+        )
+
+        if trading_system == "portfolio_management" and direction == "short":
+            reason = "Portfolio management profile does not open short/futures-style positions"
+            await _paper_exec_repo.mark_decision_failed(decision_id, reason, worker_id)
+            return
 
         if risk_model == "fixed_usd":
             # Fixed dollar amount — cap at available balance
-            risk_amount = min(risk_value, balance)
+            max_profile_risk = balance * risk_profile["max_risk_pct"] / 100.0
+            risk_amount = min(risk_value, max_profile_risk, balance)
             risk_pct    = (risk_amount / balance * 100.0) if balance > 0 else 0.0
         else:
             # Percentage of balance — clamp to 0.1%–10%
-            risk_pct    = min(max(risk_value, 0.1), 10.0)
+            risk_pct    = min(max(risk_value, 0.1), risk_profile["max_risk_pct"])
             risk_amount = balance * risk_pct / 100.0
 
         # Stop distance: prefer ATR-based, fall back to 2% of price
         atr_pct         = state.get("atr_pct")
         stop_dist_pct   = (atr_pct * 2.0) if atr_pct and atr_pct > 0 else 2.0
-        stop_dist_pct   = min(stop_dist_pct, 10.0)   # cap at 10%
+        stop_dist_pct   = min(
+            max(stop_dist_pct, risk_profile["min_stop_pct"]),
+            risk_profile["max_stop_pct"],
+        )
 
         stop_dist_abs   = entry_price * stop_dist_pct / 100.0
         if direction == "long":
@@ -467,7 +520,7 @@ async def _execute_paper_trade(
         # Position size: risk_amount / stop_distance_per_unit
         position_qty  = risk_amount / stop_dist_abs if stop_dist_abs > 0 else 0.0
         # Cap to max position size %
-        max_pos_pct   = float(bot.max_position_size_pct or 10.0)
+        max_pos_pct   = risk_profile["max_position_pct"]
         max_qty       = (balance * max_pos_pct / 100.0) / entry_price
         position_qty  = min(position_qty, max_qty)
 
@@ -485,7 +538,6 @@ async def _execute_paper_trade(
             "user_id":            str(sig.user_id),
             "bot_id":             str(sig.bot_id),
             "trade_decision_id":  decision_id,
-            "agent_run_id":       state.get("agent_run_id"),
             "exchange":           sig.exchange,
             "symbol":             sig.symbol,
             "side":               side,
@@ -494,6 +546,8 @@ async def _execute_paper_trade(
             "status":             "open",
             "entry_price":        entry_price,
             "quantity":           position_qty,
+            "filled_quantity":    position_qty,
+            "avg_fill_price":     entry_price,
             "stop_loss":          stop_loss,
             "take_profit":        take_profit,
             "risk_amount":        risk_amount,
@@ -507,6 +561,10 @@ async def _execute_paper_trade(
                 "aggregated_score": state.get("aggregated_score"),
                 "decision_reasoning": (state.get("decision_reasoning") or "")[:500],
                 "worker_id":        worker_id,
+                "trading_system":   trading_system,
+                "risk_profile":     risk_profile,
+                "reserved_on_open":  False,
+                "paper_fill_status": "filled",
             },
         }
 
@@ -527,24 +585,18 @@ async def _execute_paper_trade(
         )
 
         # ── 5. Debit paper balance (reserve risk capital) ─────────────────────
-        new_balance = balance - risk_amount
-        await _paper_exec_repo.debit_paper_balance(
-            account_id=acct["id"],
-            user_id=str(sig.user_id),
-            risk_amount=risk_amount,
-            new_balance=new_balance,
-        )
+        new_balance = balance
 
         # ── 6. Insert paper_account_events debit ─────────────────────────────
         await _paper_exec_repo.insert_paper_event({
             "account_id":       acct["id"],
             "user_id":          str(sig.user_id),
             "trade_id":         trade_id,
-            "event_type":       "open",
-            "delta":            -risk_amount,
+            "event_type":       "paper_trade_opened",
+            "delta":            0.0,
             "realized_delta":   0.0,
             "unrealized_delta": 0.0,
-            "balance_after":    new_balance,
+            "balance_after":    balance,
             "realized_after":   float(acct.get("realized_pnl") or 0),
             "unrealized_after": 0.0,
             "note": (
@@ -553,7 +605,12 @@ async def _execute_paper_trade(
                 f"| Risk {risk_pct:.1f}% = ${risk_amount:.2f} | "
                 f"SL {stop_loss:.4f} TP {take_profit:.4f}"
             ),
-            "metadata": {"trade_id": trade_id, "decision_id": decision_id},
+            "metadata": {
+                "trade_id": trade_id,
+                "decision_id": decision_id,
+                "risk_amount": risk_amount,
+                "reserved_on_open": False,
+            },
         })
 
         # ── 7. Mark decision executed ─────────────────────────────────────────
@@ -577,7 +634,8 @@ async def _execute_paper_trade(
                 "expected_reward": expected_reward,
                 "direction":     direction,
                 "balance_before": balance,
-                "balance_after":  new_balance,
+                "balance_after":  balance,
+                "reserved_on_open": False,
             },
         })
 

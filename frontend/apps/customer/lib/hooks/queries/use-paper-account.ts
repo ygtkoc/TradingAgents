@@ -95,8 +95,20 @@ export interface PaperAccountEvent {
   unrealized_delta: number;
   balance_after:    number;
   realized_after:   number;
+  unrealized_after?: number | null;
   note:             string | null;
+  metadata?:         Record<string, unknown> | null;
   created_at:       string;
+  trades?: {
+    symbol?: string | null;
+    direction?: string | null;
+    status?: string | null;
+    entry_price?: number | null;
+    exit_price?: number | null;
+    realized_pnl?: number | null;
+    pnl_pct?: number | null;
+    close_reason?: string | null;
+  } | null;
 }
 
 export function usePaperAccountEvents(limit = 50, enabled = true) {
@@ -110,7 +122,19 @@ export function usePaperAccountEvents(limit = 50, enabled = true) {
       try {
         const { data, error } = await supabase
           .from("paper_account_events")
-          .select("*")
+          .select(`
+            *,
+            trades (
+              symbol,
+              direction,
+              status,
+              entry_price,
+              exit_price,
+              realized_pnl,
+              pnl_pct,
+              close_reason
+            )
+          `)
           .eq("user_id", user!.id)
           .order("created_at", { ascending: false })
           .limit(limit);

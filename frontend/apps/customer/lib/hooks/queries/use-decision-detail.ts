@@ -16,6 +16,50 @@ import { supabase } from "../../supabase/client";
 
 import { useCurrentUser } from "./use-current-user";
 
+function normalizeAgentOutput(row: Record<string, unknown>): AgentOutput {
+  const output = (row.output as Record<string, unknown> | null) ?? {};
+  const definition = (row.agent_definitions as Record<string, unknown> | null) ?? {};
+  const agentName =
+    typeof row.agent_name === "string" ? row.agent_name
+    : typeof output.agent_name === "string" ? output.agent_name
+    : typeof definition.name === "string" ? definition.name
+    : typeof definition.display_name === "string" ? definition.display_name
+    : "unknown_agent";
+  return {
+    ...(row as unknown as AgentOutput),
+    agent_name: agentName,
+    agent_display_name: typeof definition.display_name === "string"
+      ? definition.display_name
+      : agentName,
+    decision: typeof row.decision === "string"
+      ? row.decision
+      : typeof output.decision === "string"
+        ? output.decision
+        : null,
+    score: typeof row.score === "number"
+      ? row.score
+      : typeof output.score === "number"
+        ? output.score
+        : null,
+    confidence: typeof row.confidence === "number"
+      ? row.confidence
+      : typeof output.confidence === "number"
+        ? output.confidence
+        : null,
+    veto: typeof row.veto === "boolean"
+      ? row.veto
+      : typeof output.veto === "boolean"
+        ? output.veto
+        : null,
+    reasoning: typeof row.reasoning === "string"
+      ? row.reasoning
+      : typeof output.reasoning === "string"
+        ? output.reasoning
+        : null,
+    output,
+  };
+}
+
 // ── Signal ───────────────────────────────────────────────────────────────────
 export function useSignal(signalId: string | null | undefined) {
   return useQuery<Signal | null>({
@@ -50,15 +94,30 @@ export function useDecisionAgentRuns(
       // the trade_decisions row (covers older schemas where the back-link
       // is not populated).
       let q = supabase.from("agent_runs").select("*");
-      if (decisionId)            q = q.eq("trade_decision_id", decisionId);
+      if (decisionId) q = q.eq("trade_decision_id", decisionId);
       else if (fallbackAgentRunId) q = q.eq("id", fallbackAgentRunId);
 
-      const { data, error } = await q.order("started_at", { ascending: true });
+      let { data, error } = await q.order("started_at", { ascending: true });
       if (error) {
         console.error("decision.detail.agent_runs.failed", {
           decision_id: decisionId, agent_run_id: fallbackAgentRunId, error,
         });
         throw error;
+      }
+
+      if ((!data || data.length === 0) && fallbackAgentRunId) {
+        const fallback = await supabase
+          .from("agent_runs")
+          .select("*")
+          .eq("id", fallbackAgentRunId)
+          .limit(1);
+        if (fallback.error) {
+          console.error("decision.detail.agent_run_fallback.failed", {
+            decision_id: decisionId, agent_run_id: fallbackAgentRunId, error: fallback.error,
+          });
+          throw fallback.error;
+        }
+        data = fallback.data;
       }
       return (data ?? []) as AgentRun[];
     },
@@ -74,14 +133,14 @@ export function useAgentOutputs(agentRunId: string | null | undefined) {
       if (!agentRunId) return [];
       const { data, error } = await supabase
         .from("agent_outputs")
-        .select("*")
+        .select("*, agent_definitions(name, display_name)")
         .eq("agent_run_id", agentRunId)
         .order("created_at", { ascending: true });
       if (error) {
         console.error("decision.detail.agent_outputs.failed", { agent_run_id: agentRunId, error });
         throw error;
       }
-      return (data ?? []) as AgentOutput[];
+      return ((data ?? []) as Record<string, unknown>[]).map(normalizeAgentOutput);
     },
   });
 }

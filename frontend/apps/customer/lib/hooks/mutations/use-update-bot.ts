@@ -16,6 +16,8 @@ export interface UpdateBotInput {
   max_daily_loss_pct?:    number;
   max_open_positions?:    number;
   requires_manual_approval?: boolean;
+  /** Persisted inside metadata.trading_system */
+  trading_system?:        "futures_trading" | "portfolio_management";
   /** Persisted inside metadata.stop_loss_pct */
   stop_loss_pct?:         number;
   /** Persisted inside metadata.take_profit_pct */
@@ -38,7 +40,7 @@ export function useUpdateBot(botId: string) {
       console.info("bots.update.start", { user_id: user.id, bot_id: botId, input });
 
       // ── Separate top-level columns from metadata-only fields ──────────────
-      const { stop_loss_pct, take_profit_pct, trailing_stop_pct, timeframe, risk_level, ...colFields } = input;
+      const { stop_loss_pct, take_profit_pct, trailing_stop_pct, timeframe, risk_level, trading_system, ...colFields } = input;
 
       // Fetch current metadata so we can deep-merge without clobbering other keys
       const { data: current, error: fetchErr } = await supabase
@@ -55,6 +57,7 @@ export function useUpdateBot(botId: string) {
       if (trailing_stop_pct !== undefined) metaPatch.trailing_stop_pct = trailing_stop_pct;
       if (timeframe         !== undefined) metaPatch.timeframe         = timeframe;
       if (risk_level        !== undefined) metaPatch.risk_level        = risk_level;
+      if (trading_system    !== undefined) metaPatch.trading_system    = trading_system;
 
       const patch: Record<string, unknown> = {
         ...colFields,

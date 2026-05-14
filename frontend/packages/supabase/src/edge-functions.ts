@@ -123,9 +123,22 @@ export const bots = {
 // ─── Decisions (manual approval flow) ────────────────────────────────────────
 export const decisions = {
   approve: (body: DecisionsApproveRequest) =>
-    invoke<DecisionsApproveRequest, void>("decisions-approve", body),
+    invoke<
+      { trade_decision_id: string; action: "approve" },
+      void
+    >("manual-trade-approval", {
+      trade_decision_id: body.decision_id,
+      action: "approve",
+    }),
   reject:  (body: DecisionsRejectRequest) =>
-    invoke<DecisionsRejectRequest, void>("decisions-reject", body),
+    invoke<
+      { trade_decision_id: string; action: "reject"; rejection_reason: string },
+      void
+    >("manual-trade-approval", {
+      trade_decision_id: body.decision_id,
+      action: "reject",
+      rejection_reason: body.reason,
+    }),
 };
 
 // ─── Exchange accounts (server-side encryption only) ─────────────────────────

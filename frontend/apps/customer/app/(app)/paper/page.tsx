@@ -21,7 +21,7 @@ import { useTrades }            from "@/lib/hooks/queries/use-trades";
 export default function PaperTradingPage() {
   const acct          = usePaperAccount();
   const hasPaperAccount = !!acct.data;
-  const events        = usePaperAccountEvents(20, hasPaperAccount);
+  const events        = usePaperAccountEvents(100, hasPaperAccount);
   const openTrades    = useTrades({ status: "open",   mode: "paper", limit: 25, enabled: hasPaperAccount });
   const closedTrades  = useTrades({ status: "closed", mode: "paper", limit: 25, enabled: hasPaperAccount });
 
@@ -88,6 +88,20 @@ export default function PaperTradingPage() {
   const accountStatus = ["active","paused","inactive"].includes(account.status)
     ? account.status as "active"|"paused"|"inactive"
     : "inactive";
+  const tradeRealized = (closedTrades.data ?? []).reduce((sum, t) => sum + safeNum(t.realized_pnl ?? t.pnl), 0);
+  const tradeUnrealized = (openTrades.data ?? []).reduce((sum, t) => sum + safeNum(t.unrealized_pnl ?? t.pnl), 0);
+  const realizedPnl = safeNum(account.realized_pnl) !== 0 ? safeNum(account.realized_pnl) : tradeRealized;
+  const unrealizedPnl = safeNum(account.unrealized_pnl) !== 0 ? safeNum(account.unrealized_pnl) : tradeUnrealized;
+  const ledgerEvents = events.data ?? [];
+  const totalIncome = ledgerEvents.reduce((sum, event) => {
+    const delta = safeNum(event.realized_delta || event.delta);
+    return delta > 0 ? sum + delta : sum;
+  }, 0);
+  const totalExpense = ledgerEvents.reduce((sum, event) => {
+    const delta = safeNum(event.realized_delta || event.delta);
+    return delta < 0 ? sum + Math.abs(delta) : sum;
+  }, 0);
+  const totalNet = totalIncome - totalExpense;
 
   return (
     <div className="mx-auto flex max-w-6xl flex-col gap-5">
@@ -98,6 +112,65 @@ export default function PaperTradingPage() {
 
       {/* Account hero */}
       <AccountSummary account={account} />
+
+      <div className="grid gap-3 sm:grid-cols-2">
+        <Card className="border-success/20 bg-success/5">
+          <CardHeader className="pb-2">
+            <CardDescription>Realized P&L</CardDescription>
+            <CardTitle className={cn(
+              "text-2xl tabular-nums",
+              realizedPnl > 0 ? "text-success"
+              : realizedPnl < 0 ? "text-destructive"
+              : "text-foreground",
+            )}>
+              {formatCurrency(realizedPnl)}
+            </CardTitle>
+          </CardHeader>
+        </Card>
+        <Card className="border-primary/20 bg-primary/5">
+          <CardHeader className="pb-2">
+            <CardDescription>Unrealized P&L</CardDescription>
+            <CardTitle className={cn(
+              "text-2xl tabular-nums",
+              unrealizedPnl > 0 ? "text-success"
+              : unrealizedPnl < 0 ? "text-destructive"
+              : "text-foreground",
+            )}>
+              {formatCurrency(unrealizedPnl)}
+            </CardTitle>
+          </CardHeader>
+        </Card>
+      </div>
+
+      <div className="grid gap-3 sm:grid-cols-3">
+        <Card>
+          <CardHeader className="pb-2">
+            <CardDescription>Total income</CardDescription>
+            <CardTitle className="text-xl tabular-nums text-success">
+              {formatCurrency(totalIncome)}
+            </CardTitle>
+          </CardHeader>
+        </Card>
+        <Card>
+          <CardHeader className="pb-2">
+            <CardDescription>Total expense</CardDescription>
+            <CardTitle className="text-xl tabular-nums text-destructive">
+              {formatCurrency(totalExpense)}
+            </CardTitle>
+          </CardHeader>
+        </Card>
+        <Card>
+          <CardHeader className="pb-2">
+            <CardDescription>Net ledger</CardDescription>
+            <CardTitle className={cn(
+              "text-xl tabular-nums",
+              totalNet > 0 ? "text-success" : totalNet < 0 ? "text-destructive" : "text-foreground",
+            )}>
+              {totalNet >= 0 ? "+" : ""}{formatCurrency(totalNet)}
+            </CardTitle>
+          </CardHeader>
+        </Card>
+      </div>
 
       {/* Inactive hint */}
       {accountStatus === "inactive" ? (
@@ -182,11 +255,11 @@ export default function PaperTradingPage() {
         </CardContent>
       </Card>
 
-      {/* Account events */}
+      {/* Account ledger */}
       <Card>
         <CardHeader>
-          <CardTitle>Account events</CardTitle>
-          <CardDescription>Audit trail of every balance change.</CardDescription>
+          <CardTitle>Account ledger</CardTitle>
+          <CardDescription>Every paper balance movement, linked to the trade that caused it.</CardDescription>
         </CardHeader>
         <CardContent>
           {events.isError ? (
@@ -198,39 +271,80 @@ export default function PaperTradingPage() {
           ) : (
             <ol className="space-y-1.5">
               {events.data!.map((event) => {
-                const delta = safeNum(event.delta);
+                const cashDelta = safeNum(event.delta);
+                const realizedDelta = safeNum(event.realized_delta);
+                const visibleDelta = realizedDelta !== 0 ? realizedDelta : cashDelta;
+                const balanceAfter = safeNum(event.balance_after);
+                const balanceBefore = balanceAfter - cashDelta;
+                const trade = event.trades;
+                const symbol = trade?.symbol ?? String(event.metadata?.symbol ?? "");
                 return (
                   <li
                     key={event.id}
-                    className="flex items-start justify-between gap-4 rounded-xl border border-border/30 bg-card/40 px-4 py-3 text-[13px]"
+                    className="grid gap-3 rounded-xl border border-border/30 bg-card/40 px-4 py-3 text-[13px] md:grid-cols-[1.2fr_1fr_1fr]"
                   >
                     <div className="min-w-0">
                       <div className="flex items-center gap-2">
                         <span className="font-medium text-foreground">
-                          {event.event_type.replace(/_/g, " ")}
+                          {symbol || event.event_type.replace(/_/g, " ")}
                         </span>
+                        {trade?.direction ? (
+                          <span className={cn(
+                            "rounded-full px-1.5 py-0.5 text-[10px] font-semibold uppercase",
+                            trade.direction === "long" ? "bg-success/10 text-success" : "bg-destructive/10 text-destructive",
+                          )}>
+                            {trade.direction}
+                          </span>
+                        ) : null}
                         <span className="text-[11px] text-muted-foreground/60">
                           {formatRelative(event.created_at)}
                         </span>
                       </div>
+                      <p className="mt-0.5 text-[12px] text-muted-foreground">
+                        {event.event_type.replace(/_/g, " ")}
+                        {trade?.close_reason ? ` - ${trade.close_reason}` : ""}
+                      </p>
                       {event.note ? (
                         <p className="mt-0.5 line-clamp-1 text-[12px] text-muted-foreground">
                           {event.note}
                         </p>
                       ) : null}
                     </div>
+                    <div className="grid grid-cols-2 gap-2 text-[12px] tabular-nums md:text-right">
+                      <div>
+                        <div className="text-[10px] uppercase tracking-[0.12em] text-muted-foreground/50">Entry</div>
+                        <div className="font-medium">{trade?.entry_price ? formatCurrency(trade.entry_price) : "-"}</div>
+                      </div>
+                      <div>
+                        <div className="text-[10px] uppercase tracking-[0.12em] text-muted-foreground/50">Exit</div>
+                        <div className="font-medium">{trade?.exit_price ? formatCurrency(trade.exit_price) : "-"}</div>
+                      </div>
+                    </div>
                     <div className="shrink-0 text-right">
                       <div className={cn(
                         "flex items-center gap-0.5 justify-end font-semibold tabular-nums",
-                        delta > 0 ? "text-success" : delta < 0 ? "text-destructive" : "text-foreground",
+                        visibleDelta > 0 ? "text-success" : visibleDelta < 0 ? "text-destructive" : "text-foreground",
                       )}>
-                        {delta > 0 ? <ArrowUpRight className="h-3.5 w-3.5" /> : delta < 0 ? <ArrowDownRight className="h-3.5 w-3.5" /> : null}
-                        {delta >= 0 ? "+" : ""}{formatCurrency(delta)}
+                        {visibleDelta > 0 ? <ArrowUpRight className="h-3.5 w-3.5" /> : visibleDelta < 0 ? <ArrowDownRight className="h-3.5 w-3.5" /> : null}
+                        {visibleDelta >= 0 ? "+" : ""}{formatCurrency(visibleDelta)}
                       </div>
-                      <div className="text-[10px] text-muted-foreground/50 tabular-nums">
-                        bal {formatCurrency(safeNum(event.balance_after))}
+                      <div className="mt-0.5 text-[10px] text-muted-foreground/50 tabular-nums">
+                        {formatCurrency(balanceBefore)} {"->"} {formatCurrency(balanceAfter)}
                       </div>
-                    </div>
+                      {trade?.pnl_pct != null ? (
+                        <div className={cn(
+                          "text-[10px] font-semibold tabular-nums",
+                          trade.pnl_pct > 0 ? "text-success" : trade.pnl_pct < 0 ? "text-destructive" : "text-muted-foreground",
+                        )}>
+                          {trade.pnl_pct >= 0 ? "+" : ""}{Number(trade.pnl_pct).toFixed(2)}%
+                        </div>
+                      ) : null}
+                      {realizedDelta !== cashDelta ? (
+                        <div className="text-[10px] text-muted-foreground/50 tabular-nums">
+                          cash {cashDelta >= 0 ? "+" : ""}{formatCurrency(cashDelta)}
+                        </div>
+                      ) : null}
+                      </div>
                   </li>
                 );
               })}

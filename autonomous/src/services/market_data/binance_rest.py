@@ -22,6 +22,39 @@ from src.services.market_data.models import Kline, to_internal
 log = get_logger(__name__)
 
 
+async def fetch_spot_usdt_symbols() -> list[str]:
+    """Return every currently-trading Binance spot USDT pair in compact form."""
+    url = f"{settings.market_data_binance_rest_url}/api/v3/exchangeInfo"
+    try:
+        async with httpx.AsyncClient(timeout=20.0) as client:
+            r = await client.get(url)
+            r.raise_for_status()
+            payload = r.json()
+    except Exception as exc:
+        log.warning("binance_rest.exchange_info_failed", error=str(exc)[:200])
+        return []
+
+    rows = payload.get("symbols") if isinstance(payload, dict) else None
+    if not isinstance(rows, list):
+        return []
+
+    symbols: list[str] = []
+    for row in rows:
+        if not isinstance(row, dict):
+            continue
+        symbol = str(row.get("symbol") or "").upper()
+        if (
+            row.get("status") == "TRADING"
+            and row.get("quoteAsset") == "USDT"
+            and bool(row.get("isSpotTradingAllowed", True))
+            and symbol.endswith("USDT")
+            and not any(token in symbol for token in ("UPUSDT", "DOWNUSDT", "BULLUSDT", "BEARUSDT"))
+        ):
+            symbols.append(symbol)
+
+    return sorted(set(symbols))
+
+
 async def fetch_latest_kline(symbol_binance: str, interval: str) -> Kline | None:
     """Fetch the most recent kline (open candle) — sufficient for keeping a
     snapshot pipeline warm during a WS outage."""

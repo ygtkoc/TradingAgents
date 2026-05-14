@@ -165,6 +165,7 @@ class Bot(BaseDBModel):
     max_daily_loss_pct: float = 5.0
     base_currency: str = "USDT"
     trading_pairs: list[str] = Field(default_factory=list)
+    metadata: dict[str, Any] = Field(default_factory=dict)
     # Strategy & cadence (migration 0012)
     strategy_type: Optional[str] = None  # scalping | momentum | trend_following | mean_reversion | balanced
     last_signal_at: Optional[str] = None

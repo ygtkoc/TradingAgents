@@ -232,7 +232,11 @@ async def _persist_results(
                 confidence=r.get("confidence", 0.0),
                 veto=r.get("veto", False),
                 reasoning=r.get("reasoning", "")[:2000],
-                output=r.get("output", {}),
+                output={
+                    **(r.get("output") or {}),
+                    "agent_name": r.get("agent_name"),
+                    "agent_category": r.get("agent_category"),
+                },
                 error_message=r.get("error"),
                 duration_ms=r.get("duration_ms"),
                 completed_at=utcnow_iso(),

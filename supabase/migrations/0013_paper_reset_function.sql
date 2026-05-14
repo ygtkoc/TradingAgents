@@ -96,12 +96,11 @@ BEGIN
   UPDATE public.paper_accounts
   SET
     balance          = starting_balance,
-    equity           = starting_balance,
     realized_pnl     = 0,
     unrealized_pnl   = 0,
-    status           = 'inactive',
+    status           = 'paused',
     started_at       = NULL,
-    paused_at        = NULL,
+    paused_at        = NOW(),
     updated_at       = NOW()
   WHERE user_id = p_user_id;
 

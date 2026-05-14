@@ -50,6 +50,24 @@ from src.worker import Worker
 log = get_logger(__name__)
 
 
+def _trading_system(bot: dict[str, Any]) -> str:
+    metadata = bot.get("metadata") or {}
+    raw = (
+        metadata.get("trading_system")
+        or metadata.get("system")
+        or bot.get("trading_system")
+        or "futures_trading"
+    )
+    return str(raw)
+
+
+def _minimum_cadence_minutes(bot: dict[str, Any]) -> int:
+    system = _trading_system(bot)
+    if system == "portfolio_management":
+        return settings.portfolio_min_signal_cadence_m
+    return settings.futures_min_signal_cadence_m
+
+
 class SignalGenerator(Worker):
     name             = "signal_generator"
     interval_seconds = float(settings.signal_seeder_interval_seconds)
@@ -92,6 +110,35 @@ class SignalGenerator(Worker):
             symbols=symbols,
             user_id=user_id,
         )
+
+    async def _symbols_for_bot(self, exchange: str, configured_pairs: list[str]) -> list[str]:
+        def _window(symbols: list[str]) -> list[str]:
+            if len(symbols) <= settings.signal_max_symbols_per_bot_tick:
+                return symbols
+            bucket = int(datetime.now(timezone.utc).timestamp() // max(1, settings.signal_seeder_interval_seconds))
+            start = (bucket * settings.signal_max_symbols_per_bot_tick) % len(symbols)
+            doubled = symbols + symbols
+            return doubled[start:start + settings.signal_max_symbols_per_bot_tick]
+
+        if not settings.signal_scan_all_market_symbols:
+            return configured_pairs
+
+        cached_symbols = sorted(self.cache.all().keys())
+        if cached_symbols:
+            return _window(cached_symbols)
+
+        try:
+            recent = await self.snapshot_repo.list_recent_symbols(
+                exchange,
+                settings.market_data_kline_interval,
+                since_minutes=max(10, settings.signal_seeder_max_age_minutes * 2),
+            )
+            if recent:
+                return _window(recent)
+        except Exception as exc:
+            log.warning("signal_gen.market_universe_lookup_failed", error=str(exc)[:200])
+
+        return configured_pairs
 
     async def tick(self) -> None:
         # ── 1. Kill switch ────────────────────────────────────────────────────
@@ -158,7 +205,11 @@ class SignalGenerator(Worker):
             user_id        = bot.get("user_id")
             bot_id         = bot.get("id")
             exchange       = bot.get("exchange") or "binance"
-            trading_pairs  = bot.get("trading_pairs") or []
+            configured_pairs = bot.get("trading_pairs") or []
+            if _trading_system(bot) == "portfolio_management":
+                trading_pairs = configured_pairs
+            else:
+                trading_pairs = await self._symbols_for_bot(exchange, configured_pairs)
             if not user_id or not bot_id:
                 self._log_gate_snapshot(
                     platform_enabled=enabled,
@@ -208,7 +259,8 @@ class SignalGenerator(Worker):
                 or bot.get("metadata", {}).get("strategy")
                 or "balanced"
             )
-            cooldown_m     = cadence_map.get(strategy, settings.signal_cadence_default_m)
+            base_cooldown_m = cadence_map.get(strategy, settings.signal_cadence_default_m)
+            cooldown_m      = max(base_cooldown_m, _minimum_cadence_minutes(bot))
             candles_req    = int(bot.get("candles_required") or 100)
             current_warmup = bot.get("warmup_status", "pending")
             now_utc        = datetime.now(timezone.utc)

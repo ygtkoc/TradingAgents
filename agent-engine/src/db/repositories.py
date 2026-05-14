@@ -295,7 +295,7 @@ class BotRepository:
         user_id: Optional[str] = None,
         mode: Optional[str] = None,
     ) -> int:
-        """Count truly active positions: status in (open, partially_filled).
+        """Count truly active positions: status in (open, partial_fill).
 
         Only trades with statuses that represent real capital at risk are
         counted. Closed, cancelled, failed, or reset trades are excluded.
@@ -310,7 +310,7 @@ class BotRepository:
                 get_client().table("trades")
                 .select("id, status, mode, symbol")
                 # Count only trades that hold open risk
-                .in_("status", ["open", "partially_filled"])
+                .in_("status", ["open", "partial_fill"])
                 .eq("bot_id", bot_id)
             )
             if user_id:

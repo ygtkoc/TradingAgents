@@ -58,6 +58,7 @@ class Settings(BaseSettings):
     order_confirmation_timeout_seconds: float = Field(default=30.0, ge=5.0)
     fetch_batch_size:                   int   = Field(default=10, ge=1)
     platform_settings_cache_ttl_seconds: float = Field(default=30.0, ge=5.0)
+    market_data_kline_interval:          str   = "1m"
 
     @property
     def worker_id(self) -> str:

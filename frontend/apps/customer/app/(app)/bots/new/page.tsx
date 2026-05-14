@@ -29,6 +29,11 @@ const RISK_LEVELS: { value: CreateBotInput["risk_level"]; label: string; blurb: 
   { value: "aggressive",   label: "Aggressive",   blurb: "Larger size, wider stops." },
 ];
 
+const SYSTEMS: { value: CreateBotInput["trading_system"]; label: string; blurb: string }[] = [
+  { value: "futures_trading", label: "Futures trading", blurb: "Slower RR-based directional trades." },
+  { value: "portfolio_management", label: "Portfolio management", blurb: "Small wallet-protection rebalances." },
+];
+
 const TIMEFRAMES: CreateBotInput["timeframe"][] = ["1m", "5m", "15m", "1h"];
 
 export default function NewBotPage() {
@@ -41,6 +46,7 @@ export default function NewBotPage() {
     exchange:              "binance",
     symbol:                "BTC/USDT",
     mode:                  "paper",
+    trading_system:        "futures_trading",
     strategy:              "momentum",
     risk_level:            "moderate",
     risk_model:            "percentage",
@@ -161,6 +167,23 @@ export default function NewBotPage() {
                     : <Badge variant="secondary">no connection</Badge>
                 }
               />
+            </div>
+
+            <div className="grid gap-2 sm:grid-cols-2">
+              {SYSTEMS.map((s) => (
+                <button
+                  key={s.value}
+                  type="button"
+                  onClick={() => update("trading_system", s.value)}
+                  className={cn(
+                    "rounded-lg border bg-card/40 p-3 text-left transition-all hover:bg-accent/40",
+                    form.trading_system === s.value && "border-primary bg-primary/10 ring-1 ring-primary/30",
+                  )}
+                >
+                  <div className="text-sm font-medium">{s.label}</div>
+                  <div className="text-xs text-muted-foreground">{s.blurb}</div>
+                </button>
+              ))}
             </div>
 
             <div className="grid gap-2 md:grid-cols-2">

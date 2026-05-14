@@ -31,11 +31,17 @@ const RISK_LEVELS = [
   { value: "aggressive",   label: "Aggressive",   blurb: "Larger size, wider stops." },
 ] as const;
 
+const SYSTEMS = [
+  { value: "futures_trading", label: "Futures trading", blurb: "Slower RR-based directional trades." },
+  { value: "portfolio_management", label: "Portfolio management", blurb: "Small wallet-protection rebalances." },
+] as const;
+
 const TIMEFRAMES = ["1m", "5m", "15m", "1h"] as const;
 
 interface EditForm {
   name:                  string;
   symbol:                string;
+  trading_system:        "futures_trading" | "portfolio_management";
   strategy_type:         string;
   risk_level:            "conservative" | "moderate" | "aggressive";
   risk_model:            "percentage" | "fixed_usd";
@@ -68,6 +74,7 @@ export default function BotEditPage() {
     setForm({
       name:                  bot.name,
       symbol:                bot.trading_pairs?.[0] ?? "BTC/USDT",
+      trading_system:        (meta.trading_system as EditForm["trading_system"] | undefined) ?? "futures_trading",
       strategy_type:         bot.strategy_type ?? (meta.strategy as string | undefined) ?? "balanced",
       risk_level:            (meta.risk_level as EditForm["risk_level"] | undefined) ?? "moderate",
       risk_model:            (bot.risk_model as EditForm["risk_model"]) ?? "percentage",
@@ -105,6 +112,7 @@ export default function BotEditPage() {
       trailing_stop_pct:     form.trailing_stop_pct,
       timeframe:             form.timeframe,
       risk_level:            form.risk_level,
+      trading_system:        form.trading_system,
       requires_manual_approval: form.requires_manual_approval,
     };
 
@@ -193,6 +201,23 @@ export default function BotEditPage() {
             <CardDescription>How the bot decides when to enter and exit.</CardDescription>
           </CardHeader>
           <CardContent className="space-y-4">
+            <div className="grid gap-2 md:grid-cols-2">
+              {SYSTEMS.map((s) => (
+                <button
+                  key={s.value}
+                  type="button"
+                  onClick={() => update_("trading_system", s.value)}
+                  className={cn(
+                    "rounded-xl border bg-card/40 px-4 py-3 text-left transition-all hover:border-border hover:bg-card/60",
+                    form.trading_system === s.value && "border-primary/40 bg-primary/8 ring-1 ring-primary/20",
+                  )}
+                >
+                  <div className="text-[13px] font-semibold text-foreground">{s.label}</div>
+                  <div className="mt-0.5 text-[11px] text-muted-foreground">{s.blurb}</div>
+                </button>
+              ))}
+            </div>
+
             <div className="grid gap-2 md:grid-cols-2">
               {STRATEGIES.map((s) => (
                 <button

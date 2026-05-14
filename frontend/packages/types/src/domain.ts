@@ -52,18 +52,19 @@ export interface Trade {
   unrealized_pnl: number | null;
   realized_pnl:   number | null;
   pnl:            number | null;
+  pnl_pct?:       number | null;
 
   exchange_order_id: string | null;
   close_order_id:    string | null;
   close_reason:      string | null;
 
   // Risk / position-sizing (migration 0011)
-  risk_amount:       number | null;
-  risk_percent:      number | null;
-  risk_reward_ratio: number | null;
-  r_multiple:        number | null;
-  expected_reward:   number | null;
-  notional:          number | null;
+  risk_amount?:       number | null;
+  risk_percent?:      number | null;
+  risk_reward_ratio?: number | null;
+  r_multiple?:        number | null;
+  expected_reward?:   number | null;
+  notional?:          number | null;
 
   // Lifecycle (read-only)
   lifecycle_status:           LifecycleStatus;
@@ -238,6 +239,7 @@ export interface AgentOutput {
   id:           UUID;
   agent_run_id: UUID;
   agent_name?:  string | null;
+  agent_display_name?: string | null;
   agent_definition_id?: UUID | null;
   decision?:    string | null;
   score?:       number | null;

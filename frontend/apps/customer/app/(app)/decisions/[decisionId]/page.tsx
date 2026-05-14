@@ -101,13 +101,15 @@ function ScoreBar({ score }: { score: number | null }) {
 // ── Single agent vote card ────────────────────────────────────────────────────
 function AgentVoteCard({ output }: { output: Record<string, unknown> & { agent_name?: string; id?: string } }) {
   const name      = String(output.agent_name ?? "Agent");
+  const displayName = String(output.agent_display_name ?? name);
   const meta      = agentMeta(name);
   const Icon      = meta.icon;
-  const decision  = String((output.output as Record<string, unknown>)?.decision ?? "—");
-  const score     = numOrNull((output.output as Record<string, unknown>)?.score);
-  const conf      = numOrNull((output.output as Record<string, unknown>)?.confidence);
-  const reasoning = String((output.output as Record<string, unknown>)?.reasoning ?? "");
-  const veto      = Boolean((output.output as Record<string, unknown>)?.veto);
+  const payload   = (output.output as Record<string, unknown> | undefined) ?? {};
+  const decision  = String(output.decision ?? payload.decision ?? "-");
+  const score     = numOrNull(output.score ?? payload.score);
+  const conf      = numOrNull(output.confidence ?? payload.confidence);
+  const reasoning = String(output.reasoning ?? payload.reasoning ?? "");
+  const veto      = Boolean(output.veto ?? payload.veto);
   const [expanded, setExpanded] = useState(false);
 
   return (
@@ -132,7 +134,7 @@ function AgentVoteCard({ output }: { output: Record<string, unknown> & { agent_n
         <div className="flex-1 min-w-0">
           {/* Agent name + decision */}
           <div className="flex items-center gap-2 flex-wrap">
-            <span className="text-[13px] font-semibold text-foreground">{meta.label}</span>
+            <span className="text-[13px] font-semibold text-foreground">{displayName}</span>
             <span className={cn(
               "rounded-full px-2 py-0.5 text-[11px] font-semibold",
               decision === "wait"   ? "bg-secondary text-muted-foreground"

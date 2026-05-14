@@ -54,6 +54,8 @@ class Settings(BaseSettings):
     # ── Decision thresholds ─────────────────────────────────────────────────
     score_threshold_open: float = Field(default=70.0, ge=0.0, le=100.0)
     score_threshold_manual_review: float = Field(default=40.0, ge=0.0, le=100.0)
+    min_confidence_to_open: float = Field(default=0.75, ge=0.0, le=1.0)
+    min_risk_score_to_open: float = Field(default=75.0, ge=0.0, le=100.0)
 
     # ── Risk circuit breakers ────────────────────────────────────────────────
     max_stale_snapshot_minutes: int = Field(default=15, ge=1, le=1440)

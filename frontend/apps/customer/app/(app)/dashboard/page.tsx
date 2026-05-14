@@ -15,11 +15,12 @@ import { useMemo } from "react";
 
 import { RecentDecisionsTable } from "@/components/dashboard/recent-decisions-table";
 import { RecentTradesTable }    from "@/components/dashboard/recent-trades-table";
+import { PendingApprovalsPanel } from "@/components/dashboard/pending-approvals-panel";
 import { useBots }              from "@/lib/hooks/queries/use-bots";
 import { useDecisions }         from "@/lib/hooks/queries/use-decisions";
 import { useExchangeConnections } from "@/lib/hooks/queries/use-exchange-connections";
 import { usePaperAccount }      from "@/lib/hooks/queries/use-paper-account";
-import { useTrades }            from "@/lib/hooks/queries/use-trades";
+import { isFilledPosition, useTrades } from "@/lib/hooks/queries/use-trades";
 
 export default function DashboardPage() {
   const acct           = usePaperAccount();
@@ -32,7 +33,7 @@ export default function DashboardPage() {
   // ── Derive chart series from real trades ──────────────────────────────────
   const { equity, daily, openCount, realized, unrealized, winRate } = useMemo(() => {
     const all    = trades.data ?? [];
-    const open   = all.filter((t) => t.status === "open");
+    const open   = all.filter(isFilledPosition);
     const closed = all
       .filter((t) => t.status === "closed" && t.closed_at)
       .sort((a, b) => (a.closed_at ?? "").localeCompare(b.closed_at ?? ""));
@@ -158,8 +159,16 @@ export default function DashboardPage() {
 
   // ── Account exists ──────────────────────────────────────────────────────────
   const a           = acct.data;
-  const equityValue = a ? Number(a.equity) : 0;
   const start       = a ? Number(a.starting_balance) : 0;
+  const rawAccountRealized = a ? Number(a.realized_pnl ?? 0) : 0;
+  const rawAccountUnrealized = a ? Number(a.unrealized_pnl ?? 0) : 0;
+  const accountRealized = rawAccountRealized !== 0 ? rawAccountRealized : realized;
+  const accountUnrealized = rawAccountUnrealized !== 0 ? rawAccountUnrealized : unrealized;
+  const accountBalance = a ? Number(a.balance ?? 0) : 0;
+  const accountEquity = a ? Number(a.equity ?? 0) : 0;
+  const equityValue = accountBalance > 0
+    ? accountBalance + accountUnrealized
+    : accountEquity;
   const change      = start > 0 ? ((equityValue - start) / start) * 100 : 0;
   const isPositive  = change >= 0;
   const acctStatus  = a?.status ?? "inactive";
@@ -199,7 +208,7 @@ export default function DashboardPage() {
       />
 
       {/* ── KPI strip ───────────────────────────────────────────────────────── */}
-      <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-5">
+      <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-6">
         <KpiCard
           label="Equity"
           value={formatCurrency(equityValue)}
@@ -224,10 +233,17 @@ export default function DashboardPage() {
         />
         <KpiCard
           label="Realized P&L"
-          value={formatCurrency(realized)}
+          value={formatCurrency(accountRealized)}
           loading={isLoading}
-          trend={realized > 0 ? "up" : realized < 0 ? "down" : "flat"}
-          accent={realized > 0 ? "green" : realized < 0 ? "red" : "none"}
+          trend={accountRealized > 0 ? "up" : accountRealized < 0 ? "down" : "flat"}
+          accent={accountRealized > 0 ? "green" : accountRealized < 0 ? "red" : "none"}
+        />
+        <KpiCard
+          label="Unrealized P&L"
+          value={formatCurrency(accountUnrealized)}
+          loading={isLoading}
+          trend={accountUnrealized > 0 ? "up" : accountUnrealized < 0 ? "down" : "flat"}
+          accent={accountUnrealized > 0 ? "green" : accountUnrealized < 0 ? "red" : "none"}
         />
         <KpiCard
           label="Open trades"
@@ -249,6 +265,9 @@ export default function DashboardPage() {
           }
         />
       </div>
+
+      {/* ── Pending approvals ───────────────────────────────────────────────── */}
+      <PendingApprovalsPanel />
 
       {/* ── Charts ──────────────────────────────────────────────────────────── */}
       <div className="grid gap-4 lg:grid-cols-3">

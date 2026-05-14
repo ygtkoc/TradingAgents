@@ -100,6 +100,12 @@ class Trade(BaseModel):
     unrealized_pnl:           Optional[float] = None
     realized_pnl:             Optional[float] = None
     avg_exit_price:           Optional[float] = None
+    pnl_pct:                  Optional[float] = None
+    risk_amount:              Optional[float] = None
+    risk_reward_ratio:        Optional[float] = None
+    r_multiple:               Optional[float] = None
+    expected_reward:          Optional[float] = None
+    notional:                 Optional[float] = None
 
     @property
     def effective_quantity(self) -> float:
@@ -243,7 +249,10 @@ class TradeUpdateLifecycle(BaseModel):
     status:                    Optional[str]   = None
     closed_at:                 Optional[str]   = None
     pnl:                       Optional[float] = None
+    pnl_pct:                   Optional[float] = None
+    r_multiple:                Optional[float] = None
     filled_quantity:           Optional[float] = None  # reconciliation partial-fill update
+    avg_fill_price:            Optional[float] = None
 
     def to_db_dict(self) -> dict:
         """Return only non-None fields for the DB update."""

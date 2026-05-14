@@ -153,8 +153,22 @@ def aggregate(
     score_breakdown["_risk_penalty"] = -round(risk_deduction, 2)
     score_breakdown["_final"] = round(final_score, 2)
 
-    # ── Map score to decision ─────────────────────────────────────────────────
+    # ── Aggregate confidence ──────────────────────────────────────────────────
+    confidences = [r.get("confidence", 0.5) for r in scored_results]
+    avg_confidence = sum(confidences) / len(confidences) if confidences else 0.0
+
+    # ── Map score to decision, then require enough confidence/risk margin ─────
     final_decision = _score_to_decision(final_score, direction)
+    if final_decision in {AgentDecision.OPEN_LONG, AgentDecision.OPEN_SHORT}:
+        if len(scored_results) >= 2 and avg_confidence < settings.min_confidence_to_open:
+            score_breakdown["_confidence_gate"] = -round(
+                (settings.min_confidence_to_open - avg_confidence) * 100,
+                2,
+            )
+            final_decision = AgentDecision.MANUAL_APPROVAL_REQUIRED
+        elif risk_score < settings.min_risk_score_to_open:
+            score_breakdown["_risk_gate"] = -round(settings.min_risk_score_to_open - risk_score, 2)
+            final_decision = AgentDecision.MANUAL_APPROVAL_REQUIRED
 
     # ── Compute approval status ───────────────────────────────────────────────
     approval_status, manual_required = _compute_approval(
@@ -164,10 +178,6 @@ def aggregate(
         requires_manual_approval=requires_manual_approval,
         real_trading_requires_approval=real_trading_requires_approval,
     )
-
-    # ── Aggregate confidence ──────────────────────────────────────────────────
-    confidences = [r.get("confidence", 0.5) for r in scored_results]
-    avg_confidence = sum(confidences) / len(confidences) if confidences else 0.0
 
     reasoning = (
         f"Aggregated score: {final_score:.1f} "

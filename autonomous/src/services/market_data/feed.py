@@ -27,7 +27,11 @@ from src.config import settings
 from src.db.repositories import BotRepository, MarketSnapshotRepository
 from src.heartbeat import tracker
 from src.logging_config import get_logger
-from src.services.market_data.binance_rest import fetch_kline_history, fetch_latest_kline
+from src.services.market_data.binance_rest import (
+    fetch_kline_history,
+    fetch_latest_kline,
+    fetch_spot_usdt_symbols,
+)
 from src.services.market_data.binance_ws   import stream_klines
 from src.services.market_data.cache        import MarketDataCache
 from src.services.market_data.models       import INTERNAL_TO_BINANCE, Kline, to_binance, to_internal
@@ -70,11 +74,15 @@ class MarketDataFeed:
         # ≥ 50 bars immediately rather than waiting 50+ minutes for real-time
         # candles to accumulate. This is best-effort — errors are logged but
         # never prevent the WS loop from starting.
-        await self._prefetch_history(symbols_binance)
+        prefetch_task = asyncio.create_task(
+            self._prefetch_history(symbols_binance),
+            name="market_data_prefetch",
+        )
 
         await asyncio.gather(
             self._ws_loop(symbols_binance),
             self._rest_watchdog(symbols_binance),
+            prefetch_task,
         )
 
     # ── Historical pre-seed ──────────────────────────────────────────────────
@@ -101,11 +109,33 @@ class MarketDataFeed:
             target_bars=fetch_limit,
         )
 
-        for sym_binance in symbols_binance:
+        sem = asyncio.Semaphore(settings.market_data_prefetch_concurrency)
+
+        async def _prefetch_one(sym_binance: str) -> None:
+            async with sem:
+                await self._prefetch_symbol(
+                    sym_binance=sym_binance,
+                    interval=interval,
+                    fetch_limit=fetch_limit,
+                    sufficient=sufficient,
+                    lookback_m=lookback_m,
+                )
+
+        await asyncio.gather(*[_prefetch_one(sym) for sym in symbols_binance])
+
+    async def _prefetch_symbol(
+        self,
+        *,
+        sym_binance: str,
+        interval: str,
+        fetch_limit: int,
+        sufficient: int,
+        lookback_m: int,
+    ) -> None:
             try:
                 internal = to_internal(sym_binance)
                 if not internal:
-                    continue
+                    return
 
                 existing = await self.snapshot_repo.count_recent(
                     "binance", internal, interval, since_minutes=lookback_m
@@ -117,12 +147,12 @@ class MarketDataFeed:
                         existing=existing,
                         reason="already_sufficient",
                     )
-                    continue
+                    return
 
                 klines = await fetch_kline_history(sym_binance, interval, limit=fetch_limit)
                 if not klines:
                     log.warning("feed.prefetch.empty", symbol=sym_binance)
-                    continue
+                    return
 
                 rows = [
                     {
@@ -165,8 +195,12 @@ class MarketDataFeed:
     # ── Symbol resolution ────────────────────────────────────────────────────
 
     async def _resolve_symbols(self) -> list[str]:
-        """Build the Binance symbol list from configured defaults PLUS all
-        active paper-bot trading pairs found in the database.
+        """Build the Binance symbol list.
+
+        By default this resolves every Binance spot USDT pair, so active bots
+        can evaluate the whole exchange universe instead of only their
+        configured trading_pairs. Configured and bot symbols are still merged
+        in as a fallback/override.
 
         Falls back gracefully: if the DB is unreachable, only the configured
         defaults are used (the feed still works for BTC/ETH/SOL).
@@ -179,6 +213,17 @@ class MarketDataFeed:
                 from_config.add(b)
         if not from_config:
             from_config = set(INTERNAL_TO_BINANCE.values())  # static fallback
+
+        from_exchange: set[str] = set()
+        if settings.market_data_symbol_universe.lower() in {"binance_all_usdt", "all_usdt", "all"}:
+            symbols = await fetch_spot_usdt_symbols()
+            from_exchange = {s for s in symbols if to_internal(s)}
+            if from_exchange:
+                log.info(
+                    "feed.exchange_universe_symbols",
+                    universe=settings.market_data_symbol_universe,
+                    count=len(from_exchange),
+                )
 
         # Merge user bot trading pairs.
         from_bots: set[str] = set()
@@ -201,7 +246,8 @@ class MarketDataFeed:
                 hint="Using configured defaults only",
             )
 
-        return sorted(from_config | from_bots)
+        resolved = from_exchange | from_config | from_bots
+        return sorted(resolved)
 
     # ── Private ──────────────────────────────────────────────────────────────
 

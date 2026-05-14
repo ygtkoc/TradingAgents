@@ -69,7 +69,7 @@ from src.lifecycle.action import (
     update_pnl,
 )
 from src.lifecycle.emergency import check_emergency
-from src.lifecycle.pnl import calculate_realized_pnl, calculate_unrealized_pnl
+from src.lifecycle.pnl import calculate_realized_pnl, calculate_unrealized_pnl, pnl_percentage
 from src.lifecycle.reconciliation import ReconciliationResult, reconcile_trade
 from src.lifecycle.stop_loss import check_stop_loss
 from src.lifecycle.take_profit import check_take_profit
@@ -77,6 +77,7 @@ from src.lifecycle.trailing_stop import check_trailing_stop
 from src.logging_config import get_logger
 from src.services.market_data import MarketDataService
 from src.services.notifications import NotificationService
+from src.services.paper_account import PaperAccountService
 from src.services.recovery import RecoveryService
 from src.utils.time import utcnow_iso
 
@@ -107,6 +108,7 @@ class LifecycleEngine:
         self._risk_guard       = LifecycleRiskGuard()
         self._market_data      = MarketDataService()
         self._notifications    = NotificationService()
+        self._paper_account    = PaperAccountService()
         self._recovery         = RecoveryService()
         self._key_provider     = KeyProvider()
 
@@ -253,6 +255,11 @@ class LifecycleEngine:
                 return  # MUST stop — do not run SL/TP/trailing on a drifted trade
 
             # recon returned HOLD (DB and exchange agree).
+            if trade.status == "pending":
+                log.info("lifecycle.pending_order_waiting", trade_id=trade.id)
+                await self._lifecycle_repo.release_claim(trade.id)
+                return
+
             # If trade was in needs_reconciliation status, do NOT auto-resume
             # SL/TP this cycle — release to idle and let the next cycle pick it
             # up cleanly. If it was a routine live spot-check, continue normally.
@@ -272,6 +279,11 @@ class LifecycleEngine:
                 return
 
         # ── Step 4: Evaluate lifecycle triggers ───────────────────────────────
+        if trade.status == "pending":
+            log.info("lifecycle.pending_order_waiting", trade_id=trade.id)
+            await self._lifecycle_repo.release_claim(trade.id)
+            return
+
         action = await self._evaluate_triggers(
             trade=trade,
             current_price=current_price,
@@ -461,17 +473,22 @@ class LifecycleEngine:
 
     async def _apply_update_pnl(self, trade: Trade, action: LifecycleAction) -> None:
         pnl = action.unrealized_pnl or 0.0
+        pnl_pct = pnl_percentage(pnl, trade.effective_entry_price, trade.effective_quantity)
         await self._lifecycle_repo.update_trade(
             trade.id,
-            TradeUpdateLifecycle(unrealized_pnl=pnl),
+            TradeUpdateLifecycle(unrealized_pnl=pnl, pnl=pnl, pnl_pct=pnl_pct),
         )
         await self._event_repo.create(TradeEventInsert(
             trade_id=trade.id,
             bot_id=trade.bot_id,
             user_id=trade.user_id,
             event_type="pnl_updated",
-            details={"unrealized_pnl": pnl},
+            details={"unrealized_pnl": pnl, "pnl_pct": pnl_pct},
         ))
+        if trade.mode == "paper":
+            paper_account = getattr(self, "_paper_account", None)
+            if paper_account is not None:
+                await paper_account.sync_unrealized(user_id=trade.user_id)
         await self._lifecycle_repo.release_claim(trade.id)
 
     async def _apply_update_trailing_stop(
@@ -495,6 +512,10 @@ class LifecycleEngine:
                 "lowest_price_seen":   action.new_lowest_seen,
             },
         ))
+        if trade.mode == "paper":
+            paper_account = getattr(self, "_paper_account", None)
+            if paper_account is not None:
+                await paper_account.sync_unrealized(user_id=trade.user_id)
         await self._lifecycle_repo.release_claim(trade.id)
 
     async def _apply_pause(self, trade: Trade, action: LifecycleAction) -> None:
@@ -640,15 +661,20 @@ class LifecycleEngine:
         trigger = action.metadata.get("trigger", "unknown")
 
         # ── 1. Allowed auto-update: partial-fill quantity only ─────────────────
-        if recon.needs_update and recon.new_filled_quantity is not None:
+        if recon.needs_update:
             log.info(
-                "lifecycle.recon_partial_fill_update",
+                "lifecycle.recon_trade_update",
                 trade_id=trade.id,
+                new_status=recon.new_status,
                 new_filled_quantity=recon.new_filled_quantity,
             )
             await self._lifecycle_repo.update_trade(
                 trade.id,
-                TradeUpdateLifecycle(filled_quantity=recon.new_filled_quantity),
+                TradeUpdateLifecycle(
+                    status=recon.new_status,
+                    filled_quantity=recon.new_filled_quantity,
+                    avg_fill_price=recon.new_avg_fill_price,
+                ),
             )
 
         # ── 2. Always write a trade_event for traceability ─────────────────────
@@ -825,6 +851,12 @@ class LifecycleEngine:
     ) -> None:
         """Paper/shadow close — no exchange call, mark closed immediately."""
         realized_pnl = calculate_realized_pnl(trade, close_price)
+        pnl_pct      = pnl_percentage(realized_pnl, trade.effective_entry_price, trade.effective_quantity)
+        r_multiple   = (
+            realized_pnl / trade.risk_amount
+            if trade.risk_amount and trade.risk_amount > 0
+            else None
+        )
         qty          = trade.effective_quantity
 
         log.info(
@@ -841,14 +873,17 @@ class LifecycleEngine:
             avg_exit_price=close_price,
             realized_pnl=realized_pnl,
             close_reason=action.reason,
+            pnl_pct=pnl_pct,
+            r_multiple=r_multiple,
         )
 
         # Settle paper account ledger (paper-only). Best-effort — failures
         # here are logged but never block the close.
         if trade.mode == "paper":
             try:
-                from src.services.paper_account import PaperAccountService
-                await PaperAccountService().settle_close(
+                paper_account = getattr(self, "_paper_account", None) or PaperAccountService()
+                reserved_on_open = trade.metadata.get("reserved_on_open", True)
+                await paper_account.settle_close(
                     user_id=trade.user_id,
                     trade_id=trade.id,
                     symbol=trade.symbol,
@@ -857,7 +892,9 @@ class LifecycleEngine:
                     quantity=qty,
                     direction=trade.direction,
                     realized_pnl=realized_pnl,
+                    reserved_amount=(trade.risk_amount or 0.0) if reserved_on_open else 0.0,
                 )
+                await paper_account.sync_unrealized(user_id=trade.user_id)
             except Exception as exc:
                 log.error(
                     "lifecycle.paper_account_settle_error",
@@ -873,6 +910,8 @@ class LifecycleEngine:
                 "mode":        trade.mode,
                 "close_price": close_price,
                 "realized_pnl": realized_pnl,
+                "pnl_pct":      pnl_pct,
+                "r_multiple":   r_multiple,
                 "close_reason": action.reason,
                 "simulated":   True,
             },
@@ -888,6 +927,8 @@ class LifecycleEngine:
                 "mode":        trade.mode,
                 "close_price": close_price,
                 "realized_pnl": realized_pnl,
+                "pnl_pct":      pnl_pct,
+                "r_multiple":   r_multiple,
                 "reason":      action.reason,
             },
         ))
@@ -1141,6 +1182,12 @@ class LifecycleEngine:
             fill_price   = confirmed.avg_fill_price or expected_price
             filled_qty   = confirmed.filled_quantity or trade.effective_quantity
             realized_pnl = calculate_realized_pnl(trade, fill_price)
+            pnl_pct      = pnl_percentage(realized_pnl, trade.effective_entry_price, trade.effective_quantity)
+            r_multiple   = (
+                realized_pnl / trade.risk_amount
+                if trade.risk_amount and trade.risk_amount > 0
+                else None
+            )
 
             await self._event_repo.create(TradeEventInsert(
                 trade_id=trade.id,
@@ -1162,6 +1209,8 @@ class LifecycleEngine:
                 realized_pnl=realized_pnl,
                 close_reason=action.reason,
                 close_order_id=place_result.order_id,
+                pnl_pct=pnl_pct,
+                r_multiple=r_multiple,
             )
 
             await self._audit_log.create(AuditLogInsert(
@@ -1174,6 +1223,8 @@ class LifecycleEngine:
                     "mode":        trade.mode,
                     "close_price": fill_price,
                     "realized_pnl": realized_pnl,
+                    "pnl_pct":      pnl_pct,
+                    "r_multiple":   r_multiple,
                     "order_id":    place_result.order_id,
                 },
             ))
@@ -1187,6 +1238,12 @@ class LifecycleEngine:
             fill_price  = confirmed.avg_fill_price or expected_price
             filled_qty  = confirmed.filled_quantity or 0.0
             realized_pnl = calculate_realized_pnl(trade, fill_price)
+            pnl_pct      = pnl_percentage(realized_pnl, trade.effective_entry_price, trade.effective_quantity)
+            r_multiple   = (
+                realized_pnl / trade.risk_amount
+                if trade.risk_amount and trade.risk_amount > 0
+                else None
+            )
 
             log.warning(
                 "lifecycle.partial_close_fill",
@@ -1213,6 +1270,8 @@ class LifecycleEngine:
                 realized_pnl=realized_pnl,
                 close_reason=f"{action.reason} (partial fill: {filled_qty})",
                 close_order_id=place_result.order_id,
+                pnl_pct=pnl_pct,
+                r_multiple=r_multiple,
             )
 
             await self._event_repo.create(TradeEventInsert(

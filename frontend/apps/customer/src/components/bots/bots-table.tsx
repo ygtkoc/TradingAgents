@@ -12,7 +12,7 @@ import {
 import Link from "next/link";
 
 import { useBots }         from "@/lib/hooks/queries/use-bots";
-import { useTrades }       from "@/lib/hooks/queries/use-trades";
+import { isFilledPosition, useTrades } from "@/lib/hooks/queries/use-trades";
 import { useBotMutations } from "@/lib/hooks/mutations/use-bot-mutations";
 
 // ── Color map by strategy ────────────────────────────────────────────────────
@@ -217,7 +217,7 @@ export function BotsTable() {
     return {
       bot:        b,
       pnl:        own.reduce((s, t) => s + (t.realized_pnl ?? t.unrealized_pnl ?? 0), 0),
-      openTrades: own.filter((t) => t.status === "open").length,
+      openTrades: own.filter(isFilledPosition).length,
     };
   });
 

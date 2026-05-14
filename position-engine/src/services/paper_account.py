@@ -6,9 +6,9 @@ local module instead of sharing code, to avoid coupling the engines through a
 shared Python package.
 
 Settlement math:
-    notional_returned = entry_price * quantity        (the original reservation)
+    reserved_returned = trade.risk_amount             (the original reservation)
     realised_pnl      = (exit - entry) * qty * sign(direction)
-    delta             = notional_returned + realised_pnl
+    delta             = reserved_returned + realised_pnl
 
     paper_accounts.balance      += delta
     paper_accounts.realized_pnl += realised_pnl
@@ -65,6 +65,7 @@ class PaperAccountService:
         quantity:     float,
         direction:    str,            # "long" | "short" | "neutral"
         realized_pnl: float,
+        reserved_amount: float = 0.0,
     ) -> None:
         """Best-effort: never raises. On failure, logs and the lifecycle close
         proceeds — reconciliation can repair the ledger out of band."""
@@ -76,7 +77,8 @@ class PaperAccountService:
                 return
 
             notional   = float(entry_price) * float(quantity)
-            delta      = notional + float(realized_pnl)
+            reserved   = max(0.0, float(reserved_amount or 0.0))
+            delta      = reserved + float(realized_pnl)
             balance    = float(acct.get("balance") or 0)
             realised   = float(acct.get("realized_pnl") or 0)
 
@@ -117,6 +119,7 @@ class PaperAccountService:
                             "exit":        exit_price,
                             "quantity":    quantity,
                             "notional":    notional,
+                            "reserved_returned": reserved,
                             "realized_pnl": realized_pnl,
                         },
                     }).execute()
@@ -134,3 +137,38 @@ class PaperAccountService:
                 "paper_account.settle_failed",
                 user_id=user_id, trade_id=trade_id, error=str(exc)[:300],
             )
+
+    async def sync_unrealized(self, *, user_id: str) -> None:
+        """Best-effort aggregate of open paper trade P&L into paper_accounts."""
+        try:
+            acct = await self.get_account(user_id)
+            if acct is None:
+                return
+
+            def _trades():
+                return (
+                    self._client.table("trades")
+                    .select("unrealized_pnl")
+                    .eq("user_id", user_id)
+                    .eq("mode", "paper")
+                    .in_("status", ["open", "partial_fill"])
+                    .gt("filled_quantity", 0)
+                    .execute()
+                )
+
+            rows = (await _run(_trades)).data or []
+            total_unrealized = sum(float(row.get("unrealized_pnl") or 0) for row in rows)
+
+            def _update():
+                return (
+                    self._client.table("paper_accounts")
+                    .update({"unrealized_pnl": total_unrealized})
+                    .eq("id", acct["id"])
+                    .eq("user_id", user_id)
+                    .execute()
+                )
+
+            await _run(_update)
+            log.debug("paper_account.unrealized_synced", user_id=user_id, unrealized=total_unrealized)
+        except Exception as exc:
+            log.error("paper_account.unrealized_sync_failed", user_id=user_id, error=str(exc)[:300])

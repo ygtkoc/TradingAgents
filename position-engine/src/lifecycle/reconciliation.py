@@ -43,7 +43,9 @@ _DEAD_STATUSES    = frozenset({"cancelled", "canceled", "rejected", "expired"})
 class ReconciliationResult:
     action:       LifecycleAction
     needs_update: bool = False
+    new_status: Optional[str] = None
     new_filled_quantity: Optional[float] = None
+    new_avg_fill_price: Optional[float] = None
     exchange_status: Optional[str] = None
     order_result: Optional[OrderResult] = None
 
@@ -99,6 +101,73 @@ async def reconcile_trade(
     )
 
     # ── DB open + exchange filled → out of sync ───────────────────────────────
+    if trade.status == "pending" and exchange_status in _FILLED_STATUSES:
+        new_qty = order.filled_quantity or trade.quantity
+        return ReconciliationResult(
+            action=LifecycleAction(
+                action_type=ActionType.UPDATE_PNL,
+                reason=f"Entry order filled: filled_quantity={new_qty}",
+                metadata={
+                    "trigger":             "entry_order_filled",
+                    "exchange_status":     exchange_status,
+                    "new_status":          "open",
+                    "new_filled_quantity": new_qty,
+                },
+            ),
+            needs_update=True,
+            new_status="open",
+            new_filled_quantity=new_qty,
+            new_avg_fill_price=order.avg_fill_price or trade.entry_price,
+            exchange_status=exchange_status,
+            order_result=order,
+        )
+
+    if trade.status == "pending" and exchange_status in _PARTIAL_STATUSES:
+        new_qty = order.filled_quantity or 0.0
+        return ReconciliationResult(
+            action=LifecycleAction(
+                action_type=ActionType.UPDATE_PNL,
+                reason=f"Entry order partially filled: filled_quantity={new_qty}",
+                metadata={
+                    "trigger":             "entry_order_partial_fill",
+                    "exchange_status":     exchange_status,
+                    "new_status":          "open",
+                    "new_filled_quantity": new_qty,
+                },
+            ),
+            needs_update=True,
+            new_status="open",
+            new_filled_quantity=new_qty,
+            new_avg_fill_price=order.avg_fill_price or trade.entry_price,
+            exchange_status=exchange_status,
+            order_result=order,
+        )
+
+    if trade.status == "pending" and exchange_status in _OPEN_STATUSES:
+        return ReconciliationResult(
+            action=hold(),
+            exchange_status=exchange_status,
+            order_result=order,
+        )
+
+    if trade.status == "pending" and exchange_status in _DEAD_STATUSES:
+        return ReconciliationResult(
+            action=LifecycleAction(
+                action_type=ActionType.UPDATE_PNL,
+                reason=f"Entry order is {exchange_status}; marking trade cancelled",
+                metadata={
+                    "trigger":         "entry_order_dead",
+                    "exchange_status": exchange_status,
+                    "new_status":      "cancelled",
+                    "order_id":        order_id,
+                },
+            ),
+            needs_update=True,
+            new_status="cancelled",
+            exchange_status=exchange_status,
+            order_result=order,
+        )
+
     if trade.status == "open" and exchange_status in _FILLED_STATUSES:
         return ReconciliationResult(
             action=LifecycleAction(

@@ -146,15 +146,6 @@ class DemoBootstrap(Worker):
             return
 
         if existing > 0:
-            existing_user_id = await self.user_directory.first_user_id()
-            if existing_user_id:
-                account_status = await self.paper_status_repo.ensure_active(existing_user_id)
-                log.info(
-                    "bootstrap.paper_account_activated",
-                    user_id=existing_user_id,
-                    paper_account_status=account_status,
-                    reason="bots_already_exist",
-                )
             self._already_bootstrapped = True
             self.beat_ok(state="skipped_bots_exist", existing=existing)
             return
@@ -167,8 +158,8 @@ class DemoBootstrap(Worker):
 
         # 3. Ensure user_settings row.
         await self.user_settings_repo.ensure_exists(user_id)
-        account_status = await self.paper_status_repo.ensure_active(user_id)
-        log.info("bootstrap.paper_account_activated", user_id=user_id, paper_account_status=account_status)
+        account_status = await self.paper_status_repo.status(user_id)
+        log.info("bootstrap.paper_account_status", user_id=user_id, paper_account_status=account_status)
 
         # 4. Create the three paper bots.
         if settings.dry_run:

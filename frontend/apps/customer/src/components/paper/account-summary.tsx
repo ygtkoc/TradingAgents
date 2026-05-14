@@ -31,17 +31,26 @@ export function AccountSummary({ account }: Props) {
 
   const { icon: StatusIcon, color, bg, glow } = STATUS_META[status];
 
-  const equity    = safeNum(account.equity);
   const balance   = safeNum(account.balance);
-  const realized  = safeNum(account.realized_pnl);
-  const unrealized = safeNum(account.unrealized_pnl);
+  const rawRealized = safeNum(account.realized_pnl);
+  const rawUnrealized = safeNum(account.unrealized_pnl);
   const start     = safeNum(account.starting_balance) || 1;
-  const change    = ((equity - start) / start) * 100;
-  const isPositive = change >= 0;
 
   const { data: openTrades }   = useTrades({ status: "open",  mode: "paper" });
+  const { data: closedTrades } = useTrades({ status: "closed", mode: "paper" });
   const { data: allDecisions } = useDecisions({ limit: 100 });
   const { data: bots }         = useBots();
+
+  const tradeUnrealized = (openTrades ?? []).reduce((sum, trade) =>
+    sum + safeNum(trade.unrealized_pnl ?? trade.pnl), 0);
+  const tradeRealized = (closedTrades ?? []).reduce((sum, trade) =>
+    sum + safeNum(trade.realized_pnl ?? trade.pnl), 0);
+  const realized = rawRealized !== 0 ? rawRealized : tradeRealized;
+  const unrealized = rawUnrealized !== 0 ? rawUnrealized : tradeUnrealized;
+  const accountEquity = safeNum(account.equity);
+  const equity    = balance > 0 ? balance + unrealized : accountEquity;
+  const change    = ((equity - start) / start) * 100;
+  const isPositive = change >= 0;
 
   const openTradeCount  = openTrades?.length ?? 0;
   const approvedCount   = allDecisions?.filter((d) =>

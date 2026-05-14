@@ -187,6 +187,25 @@ class TestUpdatePnlAction:
         # Claim is released
         engine._lifecycle_repo.release_claim.assert_awaited()
 
+    def test_pnl_update_writes_percentage_and_current_pnl(self):
+        engine = _make_engine()
+        engine._market_data.get_snapshot = AsyncMock(
+            return_value=make_snapshot(close_price=51_000.0)
+        )
+        trade = make_trade(
+            mode="paper",
+            direction="long",
+            entry_price=50_000.0,
+            quantity=0.1,
+            stop_loss=None,
+            take_profit=None,
+        )
+        run(engine._run_pipeline(trade))
+        update = engine._lifecycle_repo.update_trade.await_args.args[1]
+        assert update.unrealized_pnl == 100.0
+        assert update.pnl == 100.0
+        assert update.pnl_pct == 2.0
+
 
 # ── Paper close (CLOSE_STOP_LOSS) ──────────────────────────────────────────────
 
@@ -236,6 +255,25 @@ class TestPaperCloseStopLoss:
         )
         run(engine._run_pipeline(trade))
         engine._notifications.trade_closed.assert_awaited_once()
+
+    def test_paper_close_persists_r_multiple(self):
+        engine = _make_engine()
+        engine._market_data.get_snapshot = AsyncMock(
+            return_value=make_snapshot(close_price=52_000.0)
+        )
+        trade = make_trade(
+            mode="paper",
+            direction="long",
+            entry_price=50_000.0,
+            take_profit=51_000.0,
+            quantity=0.1,
+            risk_amount=100.0,
+        )
+        run(engine._run_pipeline(trade))
+        kwargs = engine._lifecycle_repo.mark_closed.await_args.kwargs
+        assert kwargs["realized_pnl"] == 200.0
+        assert kwargs["pnl_pct"] == 4.0
+        assert kwargs["r_multiple"] == 2.0
 
 
 # ── Paper close (CLOSE_TAKE_PROFIT) ───────────────────────────────────────────
