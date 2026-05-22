@@ -4,7 +4,7 @@ import {
   Button,
   Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle, DialogTrigger,
 } from "@ta/ui";
-import { Pause, Play, RefreshCw } from "lucide-react";
+import { Pause, Play, RefreshCw, XCircle } from "lucide-react";
 import { useState } from "react";
 
 import type { PaperAccount } from "@/lib/hooks/queries/use-paper-account";
@@ -17,7 +17,7 @@ interface Props {
 }
 
 export function AccountControls({ account }: Props) {
-  const { start, pause, reset } = usePaperAccountMutations();
+  const { start, pause, reset, closeOpen } = usePaperAccountMutations();
   const [resetOpen, setResetOpen] = useState(false);
   const status = account.status === "active" || account.status === "paused" || account.status === "inactive"
     ? account.status
@@ -44,6 +44,15 @@ export function AccountControls({ account }: Props) {
         </Button>
       )}
 
+      <Button
+        variant="outline"
+        onClick={() => closeOpen.mutate()}
+        disabled={closeOpen.isPending}
+      >
+        <XCircle className="mr-2 h-4 w-4" />
+        {closeOpen.isPending ? "Closing..." : "Close open positions"}
+      </Button>
+
       <Dialog open={resetOpen} onOpenChange={setResetOpen}>
         <DialogTrigger asChild>
           <Button variant="outline">
@@ -55,9 +64,9 @@ export function AccountControls({ account }: Props) {
           <DialogHeader>
             <DialogTitle>Reset paper trading</DialogTitle>
             <DialogDescription>
-              Clears your paper signals, decisions, trades and lifecycle events.
-              Your bots, exchange connections and account stay intact. Pick a
-              starting balance to begin again.
+              Clears paper-mode signals, decisions, trades, lifecycle events and
+              account events. Your bots, exchange connections and account stay
+              intact. Pick a starting balance to begin again.
             </DialogDescription>
           </DialogHeader>
 

@@ -150,6 +150,8 @@ async def test_paper_executor_creates_paper_trade():
     with (
         patch.object(executor._trade_repo, "create", AsyncMock(return_value=expected_trade)),
         patch.object(executor._event_repo, "create", AsyncMock()),
+        patch.object(executor._paper_acct, "reserve_for_open", AsyncMock(return_value=True)),
+        patch.object(executor._paper_acct, "attach_open_reservation", AsyncMock()),
     ):
         trade = await executor.execute(
             decision=decision,
@@ -161,6 +163,62 @@ async def test_paper_executor_creates_paper_trade():
 
     assert trade.mode == "paper"
     assert trade.status == TradeStatus.SIMULATED.value
+
+
+@pytest.mark.asyncio
+async def test_paper_executor_reserves_risk_not_notional():
+    decision = make_decision(
+        mode="paper",
+        risk_summary={
+            "entry_price": 100.0,
+            "quantity": 10.0,
+            "stop_loss": 98.0,
+            "take_profit": 104.0,
+            "risk_amount": 20.0,
+            "risk_percent": 2.0,
+            "risk_reward_ratio": 2.0,
+        },
+    )
+    bot = make_bot()
+    snap = make_market_snapshot(close_price=100.0)
+    order = OrderRequest(
+        exchange="binance",
+        symbol="TEST/USDT",
+        side="buy",
+        order_type="market",
+        quantity=10.0,
+        stop_loss=98.0,
+        take_profit=104.0,
+        client_order_id="test-client-id",
+    )
+
+    executor = PaperExecutor()
+    inserted_rows = []
+    reserve_mock = AsyncMock(return_value=True)
+
+    async def _capture(row):
+        inserted_rows.append(row)
+        return make_trade(mode="paper", status="open", entry_price=100.0, quantity=10.0)
+
+    with (
+        patch.object(executor._trade_repo, "create", side_effect=_capture),
+        patch.object(executor._event_repo, "create", AsyncMock()),
+        patch.object(executor._paper_acct, "reserve_for_open", reserve_mock),
+        patch.object(executor._paper_acct, "attach_open_reservation", AsyncMock()),
+    ):
+        await executor.execute(
+            decision=decision,
+            bot=bot,
+            order=order,
+            entry_price=100.0,
+            market_snapshot=snap,
+        )
+
+    assert reserve_mock.await_args.kwargs["notional"] == pytest.approx(20.0)
+    assert inserted_rows[0].filled_quantity == pytest.approx(10.0)
+    assert inserted_rows[0].avg_fill_price == pytest.approx(100.0)
+    assert inserted_rows[0].risk_amount == pytest.approx(20.0)
+    assert inserted_rows[0].notional == pytest.approx(1000.0)
 
 
 @pytest.mark.asyncio
@@ -193,6 +251,8 @@ async def test_paper_executor_never_calls_real_exchange():
     with (
         patch.object(executor._trade_repo, "create", AsyncMock(return_value=expected_trade)),
         patch.object(executor._event_repo, "create", AsyncMock()),
+        patch.object(executor._paper_acct, "reserve_for_open", AsyncMock(return_value=True)),
+        patch.object(executor._paper_acct, "attach_open_reservation", AsyncMock()),
         patch("httpx.AsyncClient.send", new=_intercept),
     ):
         await executor.execute(
@@ -223,6 +283,8 @@ async def test_paper_executor_writes_trade_event():
     with (
         patch.object(executor._trade_repo, "create", AsyncMock(return_value=expected_trade)),
         patch.object(executor._event_repo, "create", event_mock),
+        patch.object(executor._paper_acct, "reserve_for_open", AsyncMock(return_value=True)),
+        patch.object(executor._paper_acct, "attach_open_reservation", AsyncMock()),
     ):
         await executor.execute(
             decision=decision, bot=bot, order=order,
@@ -231,7 +293,7 @@ async def test_paper_executor_writes_trade_event():
 
     event_mock.assert_called_once()
     call_args = event_mock.call_args[0][0]
-    assert call_args.event_type == "paper_order_filled"
+    assert call_args.event_type == "paper_trade_opened"
 
 
 # ── ShadowExecutor ────────────────────────────────────────────────────────────

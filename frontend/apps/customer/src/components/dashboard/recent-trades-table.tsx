@@ -56,18 +56,23 @@ const columns: ColumnDef<Trade, unknown>[] = [
     header: "P&L",
     cell: ({ row }) => {
       const t   = row.original;
-      const pnl = t.status === "open"
-        ? t.unrealized_pnl ?? t.pnl ?? 0
-        : t.realized_pnl ?? t.pnl ?? 0;
-      const pct = t.pnl_pct != null ? Number(t.pnl_pct) : null;
+      const openLike = t.status === "open" || t.status === "simulated";
+      const rawPnl = openLike
+        ? (t.unrealized_pnl ?? t.pnl)
+        : t.status === "closed"
+          ? (t.realized_pnl ?? t.pnl)
+          : (t.pnl ?? null);
+
+      const pnl = rawPnl != null && Number.isFinite(Number(rawPnl)) ? Number(rawPnl) : null;
+      const pct = t.pnl_pct != null && Number.isFinite(Number(t.pnl_pct)) ? Number(t.pnl_pct) : null;
       return (
         <div className={cn(
           "flex flex-col font-semibold tabular-nums text-[13px]",
-          pnl > 0 ? "text-success" : pnl < 0 ? "text-destructive" : "text-foreground",
+          pnl == null ? "text-muted-foreground/60" : pnl > 0 ? "text-success" : pnl < 0 ? "text-destructive" : "text-foreground",
         )}>
           <span className="flex items-center gap-0.5">
-            {pnl > 0 ? <ArrowUpRight className="h-3.5 w-3.5" /> : pnl < 0 ? <ArrowDownRight className="h-3.5 w-3.5" /> : null}
-            {pnl >= 0 ? "+" : ""}{formatCurrency(pnl)}
+            {pnl != null && pnl > 0 ? <ArrowUpRight className="h-3.5 w-3.5" /> : pnl != null && pnl < 0 ? <ArrowDownRight className="h-3.5 w-3.5" /> : null}
+            {pnl == null ? "—" : (<>{pnl >= 0 ? "+" : ""}{formatCurrency(pnl)}</>)}
           </span>
           {pct != null ? (
             <span className="text-[10px] font-medium opacity-70">
@@ -90,13 +95,16 @@ const columns: ColumnDef<Trade, unknown>[] = [
 
 interface Props {
   limit?:  number;
-  status?: "open" | "closed";
+  status?: Trade["status"];
+  statuses?: Array<Trade["status"]>;
   mode?:   "paper" | "live" | "shadow";
+  emptyTitle?: string;
+  emptyDescription?: string;
 }
 
-export function RecentTradesTable({ limit = 10, status, mode }: Props) {
+export function RecentTradesTable({ limit = 10, status, statuses, mode, emptyTitle, emptyDescription }: Props) {
   const router = useRouter();
-  const { data, error, isLoading, isError } = useTrades({ limit, status, mode });
+  const { data, error, isLoading, isError } = useTrades({ limit, status, statuses, mode });
 
   if (isError) {
     console.error("dashboard.trades.section.failed", { limit, error });
@@ -109,7 +117,12 @@ export function RecentTradesTable({ limit = 10, status, mode }: Props) {
       data={data ?? []}
       loading={isLoading}
       onRowClick={(t) => router.push(`/trades/${t.id}`)}
-      empty={<EmptyState title="No trades yet" description="Trades appear as the agent pipeline opens positions." />}
+      empty={
+        <EmptyState
+          title={emptyTitle ?? "No trades yet"}
+          description={emptyDescription ?? "Trades appear as the agent pipeline opens positions."}
+        />
+      }
       pageSize={limit}
     />
   );

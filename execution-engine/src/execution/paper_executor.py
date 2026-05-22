@@ -7,6 +7,8 @@ market snapshot / entry price and reserves paper balance when opening.
 """
 from __future__ import annotations
 
+from uuid import uuid4
+
 from src.db.models import (
     Bot,
     MarketSnapshot,
@@ -58,16 +60,25 @@ class PaperExecutor:
             raise RuntimeError("Paper execution requires a valid entry price")
 
         notional = resolved_entry_price * float(order.quantity)
+        risk = self._risk_fields(
+            decision=decision,
+            bot=bot,
+            entry_price=resolved_entry_price,
+            quantity=float(order.quantity),
+            notional=notional,
+        )
+        reservation_id = uuid4().hex
         reserved = await self._paper_acct.reserve_for_open(
             user_id=decision.user_id,
             trade_id=None,
-            notional=notional,
+            notional=risk["reserve_amount"],
             symbol=order.symbol,
+            reservation_id=reservation_id,
         )
         if not reserved:
             raise RuntimeError(
                 f"Paper account has insufficient balance for {order.symbol} "
-                f"(requested notional {notional:.2f})"
+                f"(requested risk reserve {risk['reserve_amount']:.2f})"
             )
 
         log.info(
@@ -96,17 +107,45 @@ class PaperExecutor:
             stop_loss=order.stop_loss,
             take_profit=order.take_profit,
             exchange_order_id=None,
-            filled_quantity=None,
-            avg_fill_price=None,
+            filled_quantity=order.quantity,
+            avg_fill_price=resolved_entry_price,
+            unrealized_pnl=0.0,
+            realized_pnl=0.0,
+            pnl=0.0,
+            pnl_pct=0.0,
+            risk_amount=risk["risk_amount"],
+            risk_percent=risk["risk_percent"],
+            risk_reward_ratio=risk["risk_reward_ratio"],
+            expected_reward=risk["expected_reward"],
+            notional=notional,
             metadata={
                 "simulated": True,
                 "paper_execution": True,
+                "paper_fill_status": "filled",
                 "market_snapshot_id": market_snapshot.id if market_snapshot else None,
                 "bot_mode": bot.mode if bot else None,
+                "reserved_on_open": True,
+                "reserved_amount": risk["reserve_amount"],
+                "notional": notional,
+                "reservation_id": reservation_id,
             },
         )
 
-        trade = await self._trade_repo.create(trade_insert)
+        try:
+            trade = await self._trade_repo.create(trade_insert)
+            await self._paper_acct.attach_open_reservation(
+                user_id=decision.user_id,
+                trade_id=trade.id,
+                reservation_id=reservation_id,
+            )
+        except Exception as exc:
+            await self._paper_acct.release_open_reservation(
+                user_id=decision.user_id,
+                reservation_id=reservation_id,
+                symbol=order.symbol,
+                reason=str(exc),
+            )
+            raise
 
         log.info(
             "paper_trade.created",
@@ -128,6 +167,9 @@ class PaperExecutor:
                 details={
                     "fill_price": resolved_entry_price,
                     "filled_qty": order.quantity,
+                    "notional": notional,
+                    "risk_amount": risk["risk_amount"],
+                    "risk_percent": risk["risk_percent"],
                     "side": order.side,
                     "symbol": order.symbol,
                     "mode": "paper",
@@ -144,3 +186,52 @@ class PaperExecutor:
             filled_qty=order.quantity,
         )
         return trade
+
+    @staticmethod
+    def _get_float(source: dict, key: str) -> float | None:
+        try:
+            value = source.get(key)
+            return float(value) if value is not None else None
+        except (TypeError, ValueError):
+            return None
+
+    def _risk_fields(
+        self,
+        *,
+        decision: TradeDecision,
+        bot: Bot | None,
+        entry_price: float,
+        quantity: float,
+        notional: float,
+    ) -> dict[str, float | None]:
+        risk_summary = decision.risk_summary or {}
+        risk_amount = self._get_float(risk_summary, "risk_amount")
+        stop_loss = self._get_float(risk_summary, "stop_loss")
+        if risk_amount is None and stop_loss and stop_loss > 0:
+            risk_amount = abs(entry_price - stop_loss) * quantity
+
+        risk_percent = self._get_float(risk_summary, "risk_percent")
+        if risk_percent is None and bot is not None:
+            if bot.risk_model == "fixed_usd":
+                risk_percent = None
+            else:
+                risk_percent = float(bot.risk_value or bot.risk_per_trade_pct or 0)
+
+        risk_reward_ratio = (
+            self._get_float(risk_summary, "risk_reward_ratio")
+            or (float(bot.risk_reward_ratio) if bot is not None else None)
+        )
+        expected_reward = self._get_float(risk_summary, "expected_reward")
+        if expected_reward is None and risk_amount is not None and risk_reward_ratio:
+            expected_reward = risk_amount * risk_reward_ratio
+
+        reserve_amount = risk_amount if risk_amount is not None and risk_amount > 0 else notional
+        reserve_amount = min(max(reserve_amount, 0.0), notional)
+
+        return {
+            "risk_amount": risk_amount,
+            "risk_percent": risk_percent,
+            "risk_reward_ratio": risk_reward_ratio,
+            "expected_reward": expected_reward,
+            "reserve_amount": reserve_amount,
+        }

@@ -57,7 +57,8 @@ export function usePaperAccount() {
     queryKey: ["paper-account", user?.id],
     enabled:  !!user,
     staleTime: 0,
-    refetchInterval: 5_000,   // Poll every 5 s — shows balance/PnL changes live
+    refetchInterval: 1_000,
+    refetchIntervalInBackground: true,
     queryFn: async () => {
       console.info("paper_account.load.start", { user_id: user!.id });
       try {
@@ -117,7 +118,8 @@ export function usePaperAccountEvents(limit = 50, enabled = true) {
     queryKey: ["paper-account-events", user?.id, limit],
     enabled:  !!user && enabled,
     staleTime: 0,
-    refetchInterval: 5_000,
+    refetchInterval: 1_000,
+    refetchIntervalInBackground: true,
     queryFn: async () => {
       try {
         const { data, error } = await supabase

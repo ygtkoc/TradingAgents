@@ -15,6 +15,7 @@ import { useQuery } from "@tanstack/react-query";
 import { supabase } from "../../supabase/client";
 
 import { useCurrentUser } from "./use-current-user";
+import { enrichLivePnl } from "./use-trades";
 
 function normalizeAgentOutput(row: Record<string, unknown>): AgentOutput {
   const output = (row.output as Record<string, unknown> | null) ?? {};
@@ -150,6 +151,8 @@ export function useTradeForDecision(decisionId: string | null | undefined) {
   return useQuery<Trade | null>({
     queryKey: ["decisions", "trade", decisionId],
     enabled:  !!decisionId,
+    staleTime: 0,
+    refetchInterval: 5_000,
     queryFn: async () => {
       if (!decisionId) return null;
       const { data, error } = await supabase
@@ -163,7 +166,9 @@ export function useTradeForDecision(decisionId: string | null | undefined) {
         console.error("decision.detail.trade.failed", { decision_id: decisionId, error });
         throw error;
       }
-      return (data ?? null) as Trade | null;
+      const row = (data ?? null) as Trade | null;
+      if (!row) return null;
+      return (await enrichLivePnl([row]))[0] ?? row;
     },
   });
 }
@@ -173,6 +178,8 @@ export function useTradeEventsForDecision(decisionId: string | null | undefined)
   return useQuery<TradeEvent[]>({
     queryKey: ["decisions", "trade-events", decisionId],
     enabled:  !!decisionId,
+    staleTime: 0,
+    refetchInterval: 5_000,
     queryFn: async () => {
       if (!decisionId) return [];
       const { data, error } = await supabase

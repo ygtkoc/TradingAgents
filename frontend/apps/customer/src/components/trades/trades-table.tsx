@@ -14,8 +14,9 @@ import { useRouter } from "next/navigation";
 import { useState } from "react";
 
 import { useTrades } from "@/lib/hooks/queries/use-trades";
+import { formatPrice } from "@/lib/format-price";
 
-type StatusFilter = "all" | "pending" | "open" | "closed";
+type StatusFilter = "all" | Trade["status"];
 type ModeFilter   = "all" | TradeMode;
 
 const columns: ColumnDef<Trade, unknown>[] = [
@@ -56,9 +57,11 @@ const columns: ColumnDef<Trade, unknown>[] = [
       return (
         <div className={cn(
           "flex items-center gap-1 text-[11px] font-semibold",
-          s === "open"   ? "text-primary"
-          : s === "closed" ? "text-muted-foreground"
-          : s === "cancelled" ? "text-destructive/70"
+          s === "open"       ? "text-primary"
+          : s === "closed"   ? "text-muted-foreground"
+          : s === "pending"  ? "text-warning"
+          : s === "failed" || s === "cancelled" ? "text-destructive/80"
+          : s === "simulated" ? "text-muted-foreground/80"
           : "text-muted-foreground",
         )}>
           {s === "open" && (
@@ -74,7 +77,7 @@ const columns: ColumnDef<Trade, unknown>[] = [
     cell: ({ row }) => {
       const t = row.original;
       return t.entry_price
-        ? <span className="tabular-nums text-[13px]">{formatCurrency(Number(t.entry_price))}</span>
+        ? <span className="tabular-nums text-[13px]">{formatPrice(Number(t.entry_price))}</span>
         : <span className="text-muted-foreground">—</span>;
     },
   },
@@ -97,7 +100,14 @@ const columns: ColumnDef<Trade, unknown>[] = [
     cell: ({ row }) => {
       const t = row.original;
       if (t.r_multiple == null) {
-        return <span className="text-[11px] text-muted-foreground/50">—</span>;
+        return t.risk_amount != null
+          ? (
+            <span className="inline-flex flex-col tabular-nums text-[11px] font-semibold text-foreground">
+              <span>1R</span>
+              <span className="text-muted-foreground/70">{formatCurrency(Number(t.risk_amount))}</span>
+            </span>
+          )
+          : <span className="text-[11px] text-muted-foreground/50">—</span>;
       }
       const r = Number(t.r_multiple);
       return (
@@ -171,13 +181,16 @@ export function TradesTable() {
           <SelectTrigger className="h-8 w-[140px] rounded-lg border-border/60 bg-card/60 text-[12px]">
             <SelectValue placeholder="Status" />
           </SelectTrigger>
-          <SelectContent>
-            <SelectItem value="all">All status</SelectItem>
-            <SelectItem value="pending">Order stage</SelectItem>
-            <SelectItem value="open">Open</SelectItem>
-            <SelectItem value="closed">Closed</SelectItem>
-          </SelectContent>
-        </Select>
+        <SelectContent>
+          <SelectItem value="all">All status</SelectItem>
+          <SelectItem value="pending">Pending</SelectItem>
+          <SelectItem value="open">Open</SelectItem>
+          <SelectItem value="closed">Closed</SelectItem>
+          <SelectItem value="failed">Failed</SelectItem>
+          <SelectItem value="cancelled">Cancelled</SelectItem>
+          <SelectItem value="simulated">Simulated</SelectItem>
+        </SelectContent>
+      </Select>
         <Select value={mode} onValueChange={(v) => setMode(v as ModeFilter)}>
           <SelectTrigger className="h-8 w-[130px] rounded-lg border-border/60 bg-card/60 text-[12px]">
             <SelectValue placeholder="Mode" />

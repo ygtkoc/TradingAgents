@@ -872,7 +872,7 @@ class LifecycleEngine:
             exit_price=close_price,
             avg_exit_price=close_price,
             realized_pnl=realized_pnl,
-            close_reason=action.reason,
+            close_reason=_action_to_close_reason(action.action_type),
             pnl_pct=pnl_pct,
             r_multiple=r_multiple,
         )
@@ -883,6 +883,7 @@ class LifecycleEngine:
             try:
                 paper_account = getattr(self, "_paper_account", None) or PaperAccountService()
                 reserved_on_open = trade.metadata.get("reserved_on_open", True)
+                reserved_amount = self._paper_reserved_amount(trade) if reserved_on_open else 0.0
                 await paper_account.settle_close(
                     user_id=trade.user_id,
                     trade_id=trade.id,
@@ -892,7 +893,7 @@ class LifecycleEngine:
                     quantity=qty,
                     direction=trade.direction,
                     realized_pnl=realized_pnl,
-                    reserved_amount=(trade.risk_amount or 0.0) if reserved_on_open else 0.0,
+                    reserved_amount=reserved_amount,
                 )
                 await paper_account.sync_unrealized(user_id=trade.user_id)
             except Exception as exc:
@@ -1207,7 +1208,7 @@ class LifecycleEngine:
                 exit_price=fill_price,
                 avg_exit_price=fill_price,
                 realized_pnl=realized_pnl,
-                close_reason=action.reason,
+                close_reason=_action_to_close_reason(action.action_type),
                 close_order_id=place_result.order_id,
                 pnl_pct=pnl_pct,
                 r_multiple=r_multiple,
@@ -1268,7 +1269,7 @@ class LifecycleEngine:
                 exit_price=fill_price,
                 avg_exit_price=fill_price,
                 realized_pnl=realized_pnl,
-                close_reason=f"{action.reason} (partial fill: {filled_qty})",
+                close_reason=_action_to_close_reason(action.action_type),
                 close_order_id=place_result.order_id,
                 pnl_pct=pnl_pct,
                 r_multiple=r_multiple,
@@ -1333,6 +1334,29 @@ class LifecycleEngine:
         raw = f"close:{trade.id}:{trade.exchange}:{trade.symbol}"
         return hashlib.sha256(raw.encode()).hexdigest()[:32]
 
+    @staticmethod
+    def _paper_reserved_amount(trade: Trade) -> float:
+        """Return the cash reserved when this paper trade opened.
+
+        Newer paper trades persist metadata.reserved_amount. Older rows did not,
+        so fall back to notional/effective entry * quantity to release the full
+        reserved balance on close.
+        """
+        candidates = (
+            trade.metadata.get("reserved_amount"),
+            trade.metadata.get("notional"),
+            trade.notional,
+            trade.effective_entry_price * trade.effective_quantity,
+        )
+        for value in candidates:
+            try:
+                amount = float(value or 0.0)
+            except (TypeError, ValueError):
+                continue
+            if amount > 0:
+                return amount
+        return 0.0
+
     async def _fail(self, trade: Trade, error: str) -> None:
         """Mark lifecycle as failed — last resort error handler."""
         try:
@@ -1372,3 +1396,12 @@ def _action_to_risk_type(atype: ActionType) -> str:
         ActionType.CLOSE_TRAILING_STOP: "trailing_stop_triggered",
         ActionType.CLOSE_EMERGENCY:     "max_drawdown_close",
     }.get(atype, "close_failed")
+
+
+def _action_to_close_reason(atype: ActionType) -> str:
+    return {
+        ActionType.CLOSE_STOP_LOSS:     "stop_loss",
+        ActionType.CLOSE_TAKE_PROFIT:   "take_profit",
+        ActionType.CLOSE_TRAILING_STOP: "trailing_stop",
+        ActionType.CLOSE_EMERGENCY:     "emergency",
+    }.get(atype, "manual")

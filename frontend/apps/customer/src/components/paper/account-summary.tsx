@@ -2,16 +2,19 @@
 
 import { Badge } from "@ta/ui";
 import { cn, formatCurrency, formatRelative } from "@ta/utils";
+import type { Trade } from "@ta/types";
 import {
   Activity, ArrowDownRight, ArrowUpRight, Bot, CheckCircle2,
   ChevronRight, Pause, PowerOff, RefreshCw, TrendingUp, XCircle,
 } from "lucide-react";
+import { useEffect, useMemo, useState } from "react";
 
 import type { PaperAccount } from "@/lib/hooks/queries/use-paper-account";
 import { usePaperAccount }   from "@/lib/hooks/queries/use-paper-account";
 import { useBots }           from "@/lib/hooks/queries/use-bots";
 import { useDecisions }      from "@/lib/hooks/queries/use-decisions";
 import { useTrades }         from "@/lib/hooks/queries/use-trades";
+import { useUserSettings }   from "@/lib/hooks/queries/use-user-settings";
 
 import { AccountControls }   from "./account-controls";
 
@@ -40,15 +43,22 @@ export function AccountSummary({ account }: Props) {
   const { data: closedTrades } = useTrades({ status: "closed", mode: "paper" });
   const { data: allDecisions } = useDecisions({ limit: 100 });
   const { data: bots }         = useBots();
+  const { data: settings }     = useUserSettings();
+  const livePrices = useLivePrices(openTrades ?? []);
 
   const tradeUnrealized = (openTrades ?? []).reduce((sum, trade) =>
-    sum + safeNum(trade.unrealized_pnl ?? trade.pnl), 0);
+    sum + calcUnrealizedPnl(trade, livePrices), 0);
   const tradeRealized = (closedTrades ?? []).reduce((sum, trade) =>
     sum + safeNum(trade.realized_pnl ?? trade.pnl), 0);
-  const realized = rawRealized !== 0 ? rawRealized : tradeRealized;
-  const unrealized = rawUnrealized !== 0 ? rawUnrealized : tradeUnrealized;
-  const accountEquity = safeNum(account.equity);
-  const equity    = balance > 0 ? balance + unrealized : accountEquity;
+
+  // Paper accounts may briefly report 0 P&L while trades already have P&L values.
+  // Prefer account totals when they are non-zero, but fall back to trade-derived totals
+  // when the account reports zero and trades clearly have non-zero P&L.
+  const hasOpenTrades = (openTrades ?? []).length > 0;
+  const realized = rawRealized === 0 && tradeRealized !== 0 ? tradeRealized : rawRealized;
+  const unrealized = hasOpenTrades ? tradeUnrealized : rawUnrealized;
+
+  const equity    = balance + unrealized;
   const change    = ((equity - start) / start) * 100;
   const isPositive = change >= 0;
 
@@ -64,8 +74,7 @@ export function AccountSummary({ account }: Props) {
     (b) => b.mode === "paper" && !b.is_archived && b.warmup_status !== "ready",
   ).length;
 
-  const paperBots = bots?.filter((b) => b.mode === "paper" && !b.is_archived) ?? [];
-  const riskPct   = paperBots[0]?.risk_per_trade_pct ?? 2;
+  const riskPct   = settings?.default_risk_per_trade_pct ?? 2;
 
   return (
     <div className={cn(
@@ -183,4 +192,62 @@ export function AccountSummary({ account }: Props) {
 function safeNum(value: unknown): number {
   const n = Number(value);
   return Number.isFinite(n) ? n : 0;
+}
+
+function normalizeSymbol(symbol: string): string {
+  return symbol.replace("/", "").toUpperCase();
+}
+
+function useLivePrices(trades: Trade[]): Map<string, number> {
+  const [prices, setPrices] = useState<Map<string, number>>(new Map());
+  const symbols = useMemo(
+    () => Array.from(new Set(trades.map((trade) => normalizeSymbol(trade.symbol)).filter(Boolean))).sort(),
+    [trades],
+  );
+  const streams = symbols.map((symbol) => `${symbol.toLowerCase()}@ticker`).join("/");
+
+  useEffect(() => {
+    if (symbols.length === 0 || !streams) {
+      setPrices(new Map());
+      return;
+    }
+
+    let closed = false;
+    const socket = new WebSocket(`wss://stream.binance.com:9443/stream?streams=${streams}`);
+
+    socket.onmessage = (event) => {
+      try {
+        const payload = JSON.parse(String(event.data)) as { data?: { s?: string; c?: string } };
+        const symbol = payload.data?.s;
+        const price = Number(payload.data?.c);
+        if (!symbol || !Number.isFinite(price) || price <= 0 || closed) return;
+        setPrices((prev) => {
+          const next = new Map(prev);
+          next.set(symbol, price);
+          return next;
+        });
+      } catch {
+        // Ignore malformed ticker frames; the polling trade query remains the fallback.
+      }
+    };
+
+    return () => {
+      closed = true;
+      socket.close();
+    };
+  }, [streams, symbols.length]);
+
+  return prices;
+}
+
+function calcUnrealizedPnl(trade: Trade, prices: Map<string, number>): number {
+  const entry = safeNum(trade.avg_fill_price ?? trade.avg_entry_price ?? trade.entry_price);
+  const qty = safeNum(trade.filled_quantity ?? trade.quantity);
+  const livePrice = prices.get(normalizeSymbol(trade.symbol));
+  if (entry > 0 && qty > 0 && livePrice && livePrice > 0) {
+    return trade.direction === "short"
+      ? (entry - livePrice) * qty
+      : (livePrice - entry) * qty;
+  }
+  return safeNum(trade.unrealized_pnl ?? trade.pnl);
 }

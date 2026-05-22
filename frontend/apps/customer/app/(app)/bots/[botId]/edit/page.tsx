@@ -235,7 +235,7 @@ export default function BotEditPage() {
               ))}
             </div>
 
-            <div className="grid gap-2 sm:grid-cols-3">
+            <div className="hidden">
               {RISK_LEVELS.map((r) => (
                 <button
                   key={r.value}
@@ -255,7 +255,7 @@ export default function BotEditPage() {
         </Card>
 
         {/* ── Risk model ───────────────────────────────────────────────── */}
-        <Card>
+        <Card className="hidden">
           <CardHeader>
             <CardTitle>Risk model</CardTitle>
             <CardDescription>How much of the account balance is risked on each trade.</CardDescription>
@@ -311,15 +311,9 @@ export default function BotEditPage() {
         <Card>
           <CardHeader>
             <CardTitle>Sizing &amp; protective stops</CardTitle>
-            <CardDescription>Per-trade caps in percent of the paper account equity.</CardDescription>
+            <CardDescription>Protective stops and signal timeframe. Wallet risk is configured in Settings.</CardDescription>
           </CardHeader>
           <CardContent className="grid gap-4 sm:grid-cols-2">
-            <NumberField
-              label="Max position size (%)"
-              value={form.max_position_size_pct}
-              step={0.5} min={0.5} max={50}
-              onChange={(n) => update_("max_position_size_pct", n)}
-            />
             <NumberField
               label="Stop loss (%)"
               value={form.stop_loss_pct}

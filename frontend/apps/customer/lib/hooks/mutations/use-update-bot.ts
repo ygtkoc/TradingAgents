@@ -64,6 +64,9 @@ export function useUpdateBot(botId: string) {
         metadata: metaPatch,
         updated_at: new Date().toISOString(),
       };
+      if (input.risk_model === "percentage" && input.risk_value !== undefined) {
+        patch.risk_per_trade_pct = input.risk_value;
+      }
 
       const { data, error } = await supabase
         .from("bots")

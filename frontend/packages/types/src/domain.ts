@@ -43,6 +43,7 @@ export interface Trade {
   quantity:        number;
   filled_quantity: number | null;
   avg_fill_price:  number | null;
+  avg_entry_price?: number | null;
 
   stop_loss:   number | null;
   take_profit: number | null;
@@ -185,6 +186,7 @@ export interface UserSettings {
   real_trading_requires_approval: boolean;
   daily_loss_limit_usd:           number | null;
   max_concurrent_trades:          number | null;
+  default_risk_per_trade_pct?:    number | null;
 }
 
 // ── Exchange account (frontend reads via SAFE view; never raw key columns) ───

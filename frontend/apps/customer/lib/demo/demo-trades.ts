@@ -66,6 +66,7 @@ export const demoTrades: Trade[] = Array.from({ length: 25 }, (_, i) => {
     quantity:        qty,
     filled_quantity: qty,
     avg_fill_price:  entry,
+    avg_entry_price: entry,
 
     stop_loss:       entry * (direction === "long" ? 0.97 : 1.03),
     take_profit:     entry * (direction === "long" ? 1.05 : 0.95),

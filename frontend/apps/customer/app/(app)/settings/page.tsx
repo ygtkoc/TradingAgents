@@ -1,6 +1,7 @@
 "use client";
 
 import {
+  Button,
   Card, CardContent, CardDescription, CardHeader, CardTitle,
   EmptyState,
   Input,
@@ -10,13 +11,45 @@ import {
   Tabs, TabsContent, TabsList, TabsTrigger,
 } from "@ta/ui";
 import { CreditCard, Lock, Settings2, User } from "lucide-react";
+import { useEffect, useState } from "react";
 
 import { useCurrentUser } from "@/lib/hooks/queries/use-current-user";
 import { useUserSettings } from "@/lib/hooks/queries/use-user-settings";
+import { supabase } from "@/lib/supabase/client";
 
 export default function SettingsPage() {
   const { data: user }     = useCurrentUser();
-  const { data: settings } = useUserSettings();
+  const settingsQuery      = useUserSettings();
+  const { data: settings } = settingsQuery;
+  const [walletRiskPct, setWalletRiskPct] = useState("2");
+  const [riskStatus, setRiskStatus] = useState<"idle" | "saving" | "saved" | "error">("idle");
+
+  useEffect(() => {
+    if (settings?.default_risk_per_trade_pct != null) {
+      setWalletRiskPct(String(settings.default_risk_per_trade_pct));
+    }
+  }, [settings?.default_risk_per_trade_pct]);
+
+  const saveWalletRisk = async () => {
+    if (!user) return;
+    const value = Number(walletRiskPct);
+    if (!Number.isFinite(value) || value < 0.1 || value > 10) {
+      setRiskStatus("error");
+      return;
+    }
+    setRiskStatus("saving");
+    const { error } = await supabase
+      .from("user_settings")
+      .update({ default_risk_per_trade_pct: value } as never)
+      .eq("user_id", user.id);
+    if (error) {
+      console.error("settings.wallet_risk.update.failed", { error });
+      setRiskStatus("error");
+      return;
+    }
+    await settingsQuery.refetch();
+    setRiskStatus("saved");
+  };
 
   return (
     <div className="mx-auto flex max-w-3xl flex-col gap-5">
@@ -99,6 +132,43 @@ export default function SettingsPage() {
               </div>
 
               <div className="grid gap-4 sm:grid-cols-2">
+                <div className="space-y-1.5">
+                  <Label htmlFor="wallet-risk" className="text-[12px] text-muted-foreground/80">
+                    Wallet risk per trade (%)
+                  </Label>
+                  <div className="flex gap-2">
+                    <Input
+                      id="wallet-risk"
+                      type="number"
+                      value={walletRiskPct}
+                      step="0.1"
+                      min="0.1"
+                      max="10"
+                      onChange={(event) => {
+                        setWalletRiskPct(event.target.value);
+                        setRiskStatus("idle");
+                      }}
+                      className="bg-card/40 text-[13px] font-medium"
+                    />
+                    <Button
+                      type="button"
+                      variant="outline"
+                      disabled={riskStatus === "saving"}
+                      onClick={() => void saveWalletRisk()}
+                    >
+                      {riskStatus === "saving" ? "Saving" : "Save"}
+                    </Button>
+                  </div>
+                  <div className="text-[11px] text-muted-foreground">
+                    At $1,000 balance, {Number(walletRiskPct || 0).toFixed(2)}% risk equals{" "}
+                    ${(1000 * Number(walletRiskPct || 0) / 100).toFixed(2)} 1R.
+                  </div>
+                  {riskStatus === "saved" ? (
+                    <div className="text-[11px] font-medium text-success">Wallet risk saved.</div>
+                  ) : riskStatus === "error" ? (
+                    <div className="text-[11px] font-medium text-destructive">Enter a value from 0.1 to 10.</div>
+                  ) : null}
+                </div>
                 <div className="space-y-1.5">
                   <Label htmlFor="daily-loss" className="text-[12px] text-muted-foreground/80">
                     Daily loss limit (USD)

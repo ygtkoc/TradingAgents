@@ -14,7 +14,7 @@ from __future__ import annotations
 from enum import Enum
 from typing import Any, Optional
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 
 # ── Enums ─────────────────────────────────────────────────────────────────────
@@ -127,12 +127,16 @@ class Bot(BaseModel):
     max_open_positions:       int = 3
     max_position_size_pct:    float = 5.0
     risk_per_trade_pct:       float = 1.0
+    risk_model:               str = "percentage"
+    risk_value:               float = 2.0
+    risk_reward_ratio:        float = 2.0
     max_daily_loss_pct:       float = 5.0
     base_currency:            str = "USDT"
     trading_pairs:            list[str] = Field(default_factory=list)
     active_config_id:         Optional[str] = None
     exchange_account_id:      Optional[str] = None
     is_archived:              bool = False
+    metadata:                 dict[str, Any] = Field(default_factory=dict)
 
 
 class BotConfig(BaseModel):
@@ -156,6 +160,7 @@ class UserSettings(BaseModel):
     real_trading_allowed:          bool = False   # subscription-level gate
     max_concurrent_trades:         Optional[int] = None
     daily_loss_limit_usd:          Optional[float] = None
+    default_risk_per_trade_pct:    float = 2.0
 
 
 class ExchangeAccount(BaseModel):
@@ -223,12 +228,30 @@ class Trade(BaseModel):
     exit_price:         Optional[float] = None
     closed_at:          Optional[str] = None
     pnl:                Optional[float] = None
+    unrealized_pnl:     Optional[float] = None
+    realized_pnl:       Optional[float] = None
+    pnl_pct:            Optional[float] = None
+    risk_amount:        Optional[float] = None
+    risk_percent:       Optional[float] = None
+    risk_reward_ratio:  Optional[float] = None
+    r_multiple:         Optional[float] = None
+    expected_reward:    Optional[float] = None
+    notional:           Optional[float] = None
     exchange_order_id:  Optional[str] = None
     filled_quantity:    Optional[float] = None
     avg_fill_price:     Optional[float] = None
+    avg_entry_price:    Optional[float] = None
     metadata:           dict[str, Any] = Field(default_factory=dict)
     created_at:         str
     updated_at:         Optional[str] = None
+
+    @model_validator(mode="after")
+    def _mirror_avg_entry_price(self) -> "Trade":
+        if self.avg_fill_price is None and self.avg_entry_price is not None:
+            self.avg_fill_price = self.avg_entry_price
+        if self.avg_entry_price is None and self.avg_fill_price is not None:
+            self.avg_entry_price = self.avg_fill_price
+        return self
 
 
 class PlatformSettings(BaseModel):
@@ -285,6 +308,17 @@ class TradeInsert(BaseModel):
     exchange_order_id:  Optional[str] = None
     filled_quantity:    Optional[float] = None
     avg_fill_price:     Optional[float] = None
+    avg_entry_price:    Optional[float] = None
+    unrealized_pnl:     Optional[float] = None
+    realized_pnl:       Optional[float] = None
+    pnl:                Optional[float] = None
+    pnl_pct:            Optional[float] = None
+    risk_amount:        Optional[float] = None
+    risk_percent:       Optional[float] = None
+    risk_reward_ratio:  Optional[float] = None
+    r_multiple:         Optional[float] = None
+    expected_reward:    Optional[float] = None
+    notional:           Optional[float] = None
     metadata:           dict[str, Any] = Field(default_factory=dict)
 
 

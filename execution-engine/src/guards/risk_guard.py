@@ -44,6 +44,26 @@ _DEFAULT_MAX_PRICE_SLIPPAGE_PCT = settings.max_slippage_pct
 _DEFAULT_MAX_SPREAD_PCT         = settings.max_spread_pct
 
 
+def _is_futures_profile(bot: Bot) -> bool:
+    return str((bot.metadata or {}).get("trading_system") or "") == "futures_trading"
+
+
+def _risk_limit_pct(bot: Bot, user_settings: Optional[UserSettings]) -> float:
+    if user_settings is not None:
+        try:
+            value = float(user_settings.default_risk_per_trade_pct)
+            if value > 0:
+                return value
+        except (TypeError, ValueError):
+            pass
+    if bot.risk_model == "percentage":
+        try:
+            return float(bot.risk_value)
+        except (TypeError, ValueError):
+            pass
+    return float(bot.risk_per_trade_pct or 0.0)
+
+
 @dataclass
 class RiskCheckResult:
     """Result of a single risk check."""
@@ -144,6 +164,7 @@ class RiskExecutionGuard:
             stop_loss=decision.risk_summary.get("stop_loss"),
             portfolio_value_usd=portfolio_value_usd,
             bot=bot,
+            user_settings=user_settings,
         ))
 
         # ── 8. Stop-loss required (live only) ─────────────────────────────────
@@ -318,7 +339,7 @@ class RiskExecutionGuard:
         # Exposure cap: sum of all positions should not exceed 100%.
         # For a single new position we cap at max_position_size_pct * max_open_positions.
         # This is an approximation — a proper implementation would sum existing exposure.
-        max_exposure_pct = min(bot.max_position_size_pct * bot.max_open_positions, 100.0)
+        max_exposure_pct = 100.0
 
         if exposure_pct > max_exposure_pct:
             return RiskCheckResult(
@@ -358,23 +379,25 @@ class RiskExecutionGuard:
         position_value = quantity * entry_price
         size_pct = (position_value / portfolio_value_usd) * 100
 
-        if size_pct > bot.max_position_size_pct:
+        limit_pct = 100.0
+
+        if size_pct > limit_pct:
             return RiskCheckResult(
                 name="position_size_pct",
                 passed=False,
                 message=(
-                    f"Position size {size_pct:.2f}% > bot max {bot.max_position_size_pct:.2f}%"
+                    f"Position size {size_pct:.2f}% > bot max {limit_pct:.2f}%"
                 ),
                 severity="high",
                 metadata={
                     "size_pct": round(size_pct, 4),
-                    "limit_pct": bot.max_position_size_pct,
+                    "limit_pct": limit_pct,
                 },
             )
         return RiskCheckResult(
             name="position_size_pct",
             passed=True,
-            message=f"Position size {size_pct:.2f}% within limit {bot.max_position_size_pct:.2f}%",
+            message=f"Position size {size_pct:.2f}% within limit {limit_pct:.2f}%",
         )
 
     def _check_risk_per_trade(
@@ -384,10 +407,11 @@ class RiskExecutionGuard:
         stop_loss: Any,
         portfolio_value_usd: float,
         bot: Bot,
+        user_settings: Optional[UserSettings],
     ) -> RiskCheckResult:
         """
         If stop_loss is present, compute risk = (entry - stop_loss) * qty.
-        Risk should not exceed bot.risk_per_trade_pct of portfolio.
+        Risk should not exceed the account-wide wallet risk percentage.
         """
         if stop_loss is None:
             return RiskCheckResult(
@@ -418,14 +442,14 @@ class RiskExecutionGuard:
         risk_per_unit = abs(entry_price - sl)
         risk_usd      = risk_per_unit * quantity
         risk_pct      = (risk_usd / portfolio_value_usd) * 100
-        limit_pct     = bot.risk_per_trade_pct
+        limit_pct     = _risk_limit_pct(bot, user_settings)
 
         if risk_pct > limit_pct:
             return RiskCheckResult(
                 name="risk_per_trade",
                 passed=False,
                 message=(
-                    f"Trade risk {risk_pct:.2f}% > bot limit {limit_pct:.2f}%"
+                    f"Trade risk {risk_pct:.2f}% > wallet risk limit {limit_pct:.2f}%"
                 ),
                 severity="high",
                 metadata={
@@ -445,18 +469,22 @@ class RiskExecutionGuard:
     ) -> RiskCheckResult:
         has_sl = bool(decision.risk_summary.get("stop_loss"))
 
-        if is_live and settings.require_stop_loss_live and not has_sl:
+        requires_stop = (
+            (is_live and settings.require_stop_loss_live)
+            or decision.mode in {"paper", "shadow"}
+        )
+        if not has_sl and requires_stop:
             return RiskCheckResult(
                 name="stop_loss_required",
                 passed=False,
-                message="Live trade requires stop_loss; none found in risk_summary",
-                severity="critical",
+                message="Trade requires stop_loss to enforce max risk; none found in risk_summary",
+                severity="critical" if is_live else "high",
             )
 
         return RiskCheckResult(
             name="stop_loss_required",
             passed=True,
-            message="Stop-loss check passed" if has_sl else "Stop-loss optional in this mode",
+            message="Stop-loss check passed",
             severity="info" if not has_sl else "info",
         )
 

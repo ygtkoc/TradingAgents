@@ -195,18 +195,13 @@ export default function BotDetailPage() {
                 <Settings className="h-4 w-4 text-muted-foreground/50" />
                 <CardTitle>Configuration</CardTitle>
               </div>
-              <CardDescription>Risk parameters and strategy settings for this bot.</CardDescription>
+              <CardDescription>Strategy settings for this bot. Wallet risk is configured in Settings.</CardDescription>
             </CardHeader>
             <CardContent>
               <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
                 {[
                   { label: "Strategy",           value: STRATEGY_LABEL[bot.strategy_type ?? ""] ?? bot.strategy_type ?? "—" },
-                  { label: "Risk model",         value: bot.risk_model === "fixed_usd" ? "Fixed USD" : "Percentage %" },
-                  { label: "Risk value",         value: bot.risk_model === "fixed_usd" ? `$${bot.risk_value}` : `${bot.risk_value}%` },
-                  { label: "Risk:reward",        value: `1 : ${bot.risk_reward_ratio}` },
                   { label: "Max positions",      value: String(bot.max_open_positions) },
-                  { label: "Max position size",  value: `${bot.max_position_size_pct}%` },
-                  { label: "Risk per trade",     value: `${bot.risk_per_trade_pct}%` },
                   { label: "Max daily loss",     value: `${bot.max_daily_loss_pct}%` },
                   { label: "Trailing stop",      value: bot.trailing_stop_pct ?? (bot.metadata?.trailing_stop_pct as number | undefined) ?? "—" },
                   { label: "Manual approval",    value: bot.requires_manual_approval ? "Required" : "Auto" },

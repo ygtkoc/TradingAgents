@@ -9,6 +9,7 @@ import {
   ArrowLeft, Bot, Brain, ChevronRight, Clock, Shield, ShieldAlert,
   ShieldCheck, Sparkles, TrendingUp, Zap,
 } from "lucide-react";
+import type { Trade } from "@ta/types";
 import Link from "next/link";
 import { useParams } from "next/navigation";
 import { useEffect, useMemo, useState } from "react";
@@ -18,6 +19,7 @@ import {
   getDecisionConfidence, getDecisionRationale,
   getDecisionReasoning, getDecisionScore,
 } from "@/lib/decisions/summary";
+import { formatPrice } from "@/lib/format-price";
 import {
   useAgentOutputs, useDecisionAgentRuns, useSignal,
   useTradeEventsForDecision, useTradeForDecision,
@@ -362,6 +364,13 @@ export default function DecisionDetailPage() {
       </div>
 
       {/* ── Agent voting panel ──────────────────────────────────────────────── */}
+      <DecisionExecutionPanel
+        decisionStatus={decision.execution_status}
+        approvalStatus={decision.approval_status}
+        trade={tradeQ.data ?? null}
+        isLoading={tradeQ.isLoading}
+      />
+
       <div>
         <div className="mb-3 flex items-center gap-2">
           <h2 className="text-[15px] font-semibold text-foreground">Agent votes</h2>
@@ -446,7 +455,7 @@ export default function DecisionDetailPage() {
                 </Link>
                 <div className="grid gap-2 sm:grid-cols-2">
                   <MetaField label="Status"      value={tradeQ.data.status} />
-                  <MetaField label="Entry price" value={formatCurrency(tradeQ.data.entry_price)} />
+                  <MetaField label="Entry price" value={formatPrice(tradeQ.data.entry_price)} />
                   <MetaField label="P&L"         value={
                     tradeQ.data.realized_pnl != null ? formatCurrency(tradeQ.data.realized_pnl)
                     : tradeQ.data.unrealized_pnl != null ? `${formatCurrency(tradeQ.data.unrealized_pnl)} (open)` : "—"
@@ -495,6 +504,85 @@ export default function DecisionDetailPage() {
 }
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
+
+function DecisionExecutionPanel({
+  decisionStatus,
+  approvalStatus,
+  trade,
+  isLoading,
+}: {
+  decisionStatus: string;
+  approvalStatus: string;
+  trade: Trade | null;
+  isLoading: boolean;
+}) {
+  if (isLoading) return <Skeleton className="h-24 rounded-xl" />;
+
+  const isOpened = trade?.status === "open";
+  const isClosed = trade?.status === "closed";
+  const pnl = trade
+    ? isOpened
+      ? Number(trade.unrealized_pnl ?? trade.pnl ?? 0)
+      : Number(trade.realized_pnl ?? trade.pnl ?? 0)
+    : null;
+  const pnlPct = trade?.pnl_pct != null ? Number(trade.pnl_pct) : null;
+
+  return (
+    <div className="grid gap-3 md:grid-cols-4">
+      <DecisionStateTile
+        label="Decision"
+        value={decisionStatus.replace(/_/g, " ")}
+        detail={`Approval: ${approvalStatus.replace(/_/g, " ")}`}
+        tone={decisionStatus === "executed" ? "success" : decisionStatus === "failed" ? "destructive" : "warning"}
+      />
+      <DecisionStateTile
+        label="Trade"
+        value={trade ? trade.status.replace(/_/g, " ") : "No trade"}
+        detail={trade ? trade.lifecycle_status.replace(/_/g, " ") : "Nothing opened yet"}
+        tone={isClosed ? "muted" : isOpened ? "success" : trade ? "warning" : "muted"}
+      />
+      <DecisionStateTile
+        label="Entry"
+        value={trade ? formatPrice(Number(trade.avg_fill_price ?? trade.avg_entry_price ?? trade.entry_price)) : "-"}
+        detail={trade?.filled_quantity != null ? `Filled ${Number(trade.filled_quantity).toFixed(8)}` : "Fill pending"}
+      />
+      <DecisionStateTile
+        label="P&L"
+        value={pnl != null ? `${pnl >= 0 ? "+" : ""}${formatCurrency(pnl)}` : "-"}
+        detail={pnlPct != null ? `${pnlPct >= 0 ? "+" : ""}${pnlPct.toFixed(2)}%` : "No P&L yet"}
+        className={pnl != null && pnl > 0 ? "text-success" : pnl != null && pnl < 0 ? "text-destructive" : undefined}
+      />
+    </div>
+  );
+}
+
+function DecisionStateTile({
+  label,
+  value,
+  detail,
+  tone,
+  className,
+}: {
+  label: string;
+  value: string;
+  detail: string;
+  tone?: "success" | "warning" | "destructive" | "muted";
+  className?: string;
+}) {
+  return (
+    <div className={cn(
+      "rounded-xl border border-border/40 bg-card/50 px-4 py-3",
+      tone === "success" && "border-success/25 bg-success/5",
+      tone === "warning" && "border-warning/25 bg-warning/5",
+      tone === "destructive" && "border-destructive/25 bg-destructive/5",
+      tone === "muted" && "bg-muted/20",
+    )}>
+      <div className="text-[9px] font-semibold uppercase tracking-[0.12em] text-muted-foreground/60">{label}</div>
+      <div className={cn("mt-1 text-[14px] font-semibold capitalize text-foreground", className)}>{value}</div>
+      <div className="mt-0.5 text-[11px] text-muted-foreground">{detail}</div>
+    </div>
+  );
+}
 
 function num(value: unknown): number | null {
   if (typeof value === "number" && Number.isFinite(value)) return value;

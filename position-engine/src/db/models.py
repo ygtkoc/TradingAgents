@@ -8,7 +8,7 @@ from __future__ import annotations
 from enum import Enum
 from typing import Any, Optional
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 
 # ── Enums ─────────────────────────────────────────────────────────────────────
@@ -81,6 +81,7 @@ class Trade(BaseModel):
     exchange_order_id:        Optional[str]  = None
     filled_quantity:          Optional[float] = None
     avg_fill_price:           Optional[float] = None
+    avg_entry_price:          Optional[float] = None
     metadata:                 dict[str, Any] = Field(default_factory=dict)
     created_at:               str
     updated_at:               Optional[str]  = None
@@ -106,6 +107,14 @@ class Trade(BaseModel):
     r_multiple:               Optional[float] = None
     expected_reward:          Optional[float] = None
     notional:                 Optional[float] = None
+
+    @model_validator(mode="after")
+    def _mirror_avg_entry_price(self) -> "Trade":
+        if self.avg_fill_price is None and self.avg_entry_price is not None:
+            self.avg_fill_price = self.avg_entry_price
+        if self.avg_entry_price is None and self.avg_fill_price is not None:
+            self.avg_entry_price = self.avg_fill_price
+        return self
 
     @property
     def effective_quantity(self) -> float:
@@ -253,10 +262,17 @@ class TradeUpdateLifecycle(BaseModel):
     r_multiple:                Optional[float] = None
     filled_quantity:           Optional[float] = None  # reconciliation partial-fill update
     avg_fill_price:            Optional[float] = None
+    avg_entry_price:           Optional[float] = None
 
     def to_db_dict(self) -> dict:
         """Return only non-None fields for the DB update."""
-        return {k: v for k, v in self.model_dump().items() if v is not None}
+        data = {k: v for k, v in self.model_dump().items() if v is not None}
+        if "avg_fill_price" in data and "avg_entry_price" not in data:
+            data["avg_entry_price"] = data.pop("avg_fill_price")
+        else:
+            data.pop("avg_fill_price", None)
+        data.pop("pnl", None)
+        return data
 
 
 class TradeEventInsert(BaseModel):

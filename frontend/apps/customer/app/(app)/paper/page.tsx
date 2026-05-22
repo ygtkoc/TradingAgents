@@ -1,24 +1,28 @@
 "use client";
 
 import {
+  Button,
   Card, CardContent, CardDescription, CardHeader, CardTitle,
   EmptyState, ErrorState, PageHeader, Skeleton,
 } from "@ta/ui";
 import { cn, formatCurrency, formatRelative } from "@ta/utils";
 import {
-  ArrowUpRight, ArrowDownRight, BarChart3, Clock, Sparkles,
+  ArrowUpRight, ArrowDownRight, BarChart3, ChevronRight, Clock, Sparkles,
 } from "lucide-react";
+import { useRouter } from "next/navigation";
 import { useEffect } from "react";
 
 import { RecentDecisionsTable } from "@/components/dashboard/recent-decisions-table";
 import { RecentTradesTable }    from "@/components/dashboard/recent-trades-table";
 import { AccountSummary }       from "@/components/paper/account-summary";
 import { PaperOnboardingCard }  from "@/components/paper/paper-onboarding";
+import { formatPrice }          from "@/lib/format-price";
 import { usePaperAccountMutations } from "@/lib/hooks/mutations/use-paper-account-mutations";
 import { usePaperAccount, usePaperAccountEvents } from "@/lib/hooks/queries/use-paper-account";
 import { useTrades }            from "@/lib/hooks/queries/use-trades";
 
 export default function PaperTradingPage() {
+  const router        = useRouter();
   const acct          = usePaperAccount();
   const hasPaperAccount = !!acct.data;
   const events        = usePaperAccountEvents(100, hasPaperAccount);
@@ -88,10 +92,6 @@ export default function PaperTradingPage() {
   const accountStatus = ["active","paused","inactive"].includes(account.status)
     ? account.status as "active"|"paused"|"inactive"
     : "inactive";
-  const tradeRealized = (closedTrades.data ?? []).reduce((sum, t) => sum + safeNum(t.realized_pnl ?? t.pnl), 0);
-  const tradeUnrealized = (openTrades.data ?? []).reduce((sum, t) => sum + safeNum(t.unrealized_pnl ?? t.pnl), 0);
-  const realizedPnl = safeNum(account.realized_pnl) !== 0 ? safeNum(account.realized_pnl) : tradeRealized;
-  const unrealizedPnl = safeNum(account.unrealized_pnl) !== 0 ? safeNum(account.unrealized_pnl) : tradeUnrealized;
   const ledgerEvents = events.data ?? [];
   const totalIncome = ledgerEvents.reduce((sum, event) => {
     const delta = safeNum(event.realized_delta || event.delta);
@@ -113,63 +113,25 @@ export default function PaperTradingPage() {
       {/* Account hero */}
       <AccountSummary account={account} />
 
-      <div className="grid gap-3 sm:grid-cols-2">
-        <Card className="border-success/20 bg-success/5">
-          <CardHeader className="pb-2">
-            <CardDescription>Realized P&L</CardDescription>
-            <CardTitle className={cn(
-              "text-2xl tabular-nums",
-              realizedPnl > 0 ? "text-success"
-              : realizedPnl < 0 ? "text-destructive"
-              : "text-foreground",
-            )}>
-              {formatCurrency(realizedPnl)}
-            </CardTitle>
-          </CardHeader>
-        </Card>
-        <Card className="border-primary/20 bg-primary/5">
-          <CardHeader className="pb-2">
-            <CardDescription>Unrealized P&L</CardDescription>
-            <CardTitle className={cn(
-              "text-2xl tabular-nums",
-              unrealizedPnl > 0 ? "text-success"
-              : unrealizedPnl < 0 ? "text-destructive"
-              : "text-foreground",
-            )}>
-              {formatCurrency(unrealizedPnl)}
-            </CardTitle>
-          </CardHeader>
-        </Card>
-      </div>
-
       <div className="grid gap-3 sm:grid-cols-3">
-        <Card>
-          <CardHeader className="pb-2">
-            <CardDescription>Total income</CardDescription>
-            <CardTitle className="text-xl tabular-nums text-success">
-              {formatCurrency(totalIncome)}
-            </CardTitle>
-          </CardHeader>
-        </Card>
-        <Card>
-          <CardHeader className="pb-2">
-            <CardDescription>Total expense</CardDescription>
-            <CardTitle className="text-xl tabular-nums text-destructive">
-              {formatCurrency(totalExpense)}
-            </CardTitle>
-          </CardHeader>
-        </Card>
-        <Card>
-          <CardHeader className="pb-2">
-            <CardDescription>Net ledger</CardDescription>
-            <CardTitle className={cn(
-              "text-xl tabular-nums",
-              totalNet > 0 ? "text-success" : totalNet < 0 ? "text-destructive" : "text-foreground",
-            )}>
-              {totalNet >= 0 ? "+" : ""}{formatCurrency(totalNet)}
-            </CardTitle>
-          </CardHeader>
-        </Card>
+        <LedgerSummaryButton
+          label="Total income"
+          value={formatCurrency(totalIncome)}
+          tone="income"
+          onClick={() => router.push("/paper/income")}
+        />
+        <LedgerSummaryButton
+          label="Total expense"
+          value={formatCurrency(totalExpense)}
+          tone="expense"
+          onClick={() => router.push("/paper/expense")}
+        />
+        <LedgerSummaryButton
+          label="Net ledger"
+          value={`${totalNet >= 0 ? "+" : ""}${formatCurrency(totalNet)}`}
+          tone={totalNet > 0 ? "income" : totalNet < 0 ? "expense" : "neutral"}
+          onClick={() => router.push("/paper/ledger")}
+        />
       </div>
 
       {/* Inactive hint */}
@@ -236,24 +198,42 @@ export default function PaperTradingPage() {
         </Card>
       </div>
 
-      {/* Closed trades */}
-      <Card>
-        <CardHeader>
-          <CardTitle>Closed positions</CardTitle>
-          <CardDescription>Realized outcomes contribute to the realized P&L above.</CardDescription>
-        </CardHeader>
-        <CardContent>
-          {closedTrades.isError ? (
-            <ErrorState title="Closed trades unavailable" onRetry={() => void closedTrades.refetch()} />
-          ) : closedTrades.isLoading ? (
-            <Skeleton className="h-40 w-full rounded-xl" />
-          ) : (closedTrades.data ?? []).length === 0 ? (
-            <EmptyState title="No closed positions yet" />
-          ) : (
-            <RecentTradesTable limit={25} status="closed" mode="paper" />
-          )}
-        </CardContent>
-      </Card>
+      {/* Closed trades + issues */}
+      <div className="grid gap-4 lg:grid-cols-2">
+        <Card>
+          <CardHeader>
+            <CardTitle>Closed positions</CardTitle>
+            <CardDescription>Realized outcomes contribute to the realized P&L above.</CardDescription>
+          </CardHeader>
+          <CardContent>
+            {closedTrades.isError ? (
+              <ErrorState title="Closed trades unavailable" onRetry={() => void closedTrades.refetch()} />
+            ) : closedTrades.isLoading ? (
+              <Skeleton className="h-40 w-full rounded-xl" />
+            ) : (closedTrades.data ?? []).length === 0 ? (
+              <EmptyState title="No closed positions yet" />
+            ) : (
+              <RecentTradesTable limit={25} status="closed" mode="paper" />
+            )}
+          </CardContent>
+        </Card>
+
+        <Card>
+          <CardHeader>
+            <CardTitle>Orders & issues</CardTitle>
+            <CardDescription>Pending / failed / cancelled paper trades.</CardDescription>
+          </CardHeader>
+          <CardContent>
+            <RecentTradesTable
+              limit={25}
+              mode="paper"
+              statuses={["pending", "failed", "cancelled"]}
+              emptyTitle="No pending/failed trades"
+              emptyDescription="If an order is pending, fails, or is cancelled, it appears here."
+            />
+          </CardContent>
+        </Card>
+      </div>
 
       {/* Account ledger */}
       <Card>
@@ -273,7 +253,9 @@ export default function PaperTradingPage() {
               {events.data!.map((event) => {
                 const cashDelta = safeNum(event.delta);
                 const realizedDelta = safeNum(event.realized_delta);
-                const visibleDelta = realizedDelta !== 0 ? realizedDelta : cashDelta;
+                const eventType = String(event.event_type ?? "");
+                const preferRealized = realizedDelta !== 0 || eventType.includes("close") || eventType.includes("settle");
+                const visibleDelta = preferRealized ? realizedDelta : cashDelta;
                 const balanceAfter = safeNum(event.balance_after);
                 const balanceBefore = balanceAfter - cashDelta;
                 const trade = event.trades;
@@ -313,11 +295,11 @@ export default function PaperTradingPage() {
                     <div className="grid grid-cols-2 gap-2 text-[12px] tabular-nums md:text-right">
                       <div>
                         <div className="text-[10px] uppercase tracking-[0.12em] text-muted-foreground/50">Entry</div>
-                        <div className="font-medium">{trade?.entry_price ? formatCurrency(trade.entry_price) : "-"}</div>
+                        <div className="font-medium">{trade?.entry_price ? formatPrice(trade.entry_price) : "-"}</div>
                       </div>
                       <div>
                         <div className="text-[10px] uppercase tracking-[0.12em] text-muted-foreground/50">Exit</div>
-                        <div className="font-medium">{trade?.exit_price ? formatCurrency(trade.exit_price) : "-"}</div>
+                        <div className="font-medium">{trade?.exit_price ? formatPrice(trade.exit_price) : "-"}</div>
                       </div>
                     </div>
                     <div className="shrink-0 text-right">
@@ -359,4 +341,42 @@ export default function PaperTradingPage() {
 function safeNum(value: unknown): number {
   const n = Number(value);
   return Number.isFinite(n) ? n : 0;
+}
+
+function LedgerSummaryButton({
+  label,
+  value,
+  tone,
+  onClick,
+}: {
+  label: string;
+  value: string;
+  tone: "income" | "expense" | "neutral";
+  onClick: () => void;
+}) {
+  return (
+    <Button
+      type="button"
+      variant="outline"
+      onClick={onClick}
+      className={cn(
+        "h-auto justify-between rounded-xl border-border/50 bg-card/55 px-4 py-3 text-left hover:bg-card/80",
+        tone === "income" && "hover:border-success/35",
+        tone === "expense" && "hover:border-destructive/35",
+      )}
+    >
+      <span className="flex flex-col gap-1">
+        <span className="text-[11px] font-semibold uppercase tracking-[0.12em] text-muted-foreground/65">
+          {label}
+        </span>
+        <span className={cn(
+          "text-xl font-bold tabular-nums",
+          tone === "income" ? "text-success" : tone === "expense" ? "text-destructive" : "text-foreground",
+        )}>
+          {value}
+        </span>
+      </span>
+      <ChevronRight className="h-4 w-4 text-muted-foreground/50" />
+    </Button>
+  );
 }

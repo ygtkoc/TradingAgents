@@ -63,6 +63,7 @@ export interface UserSettingsUpdateRequest {
   trading_enabled?:        boolean;
   daily_loss_limit_usd?:   number | null;
   max_concurrent_trades?:  number | null;
+  default_risk_per_trade_pct?: number | null;
 }
 
 // ─── Paper account ───────────────────────────────────────────────────────────
@@ -74,7 +75,15 @@ export interface PaperAccountResetResponse  {
   account_id: string;
   starting_balance: number;
   status?: "paused";
-  deleted: { signals: number; decisions: number; trades: number; events: number; account_events: number };
+  deleted: {
+    signals: number;
+    agent_runs?: number;
+    agent_outputs?: number;
+    decisions: number;
+    trades: number;
+    events: number;
+    account_events: number;
+  };
 }
 
 export interface PaperAccountStartResponse  { account_id: string; status: "active" }

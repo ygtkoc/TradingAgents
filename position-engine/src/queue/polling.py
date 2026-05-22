@@ -57,6 +57,7 @@ class PollingTradePoller(TradePoller):
         while not self._stopped:
             try:
                 claimed_count = 0
+                await self._repo.release_stale_claims(settings.position_stale_minutes)
 
                 # ── Phase 1: Fetch candidate IDs (non-locking) ───────────────
                 ids = await self._repo.fetch_claimable_ids(

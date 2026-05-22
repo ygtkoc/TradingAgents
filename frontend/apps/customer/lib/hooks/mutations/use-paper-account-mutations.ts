@@ -266,37 +266,20 @@ export function usePaperAccountMutations() {
 
       // ── Try paper_reset() RPC first (works in dev + prod with authenticated client).
       // The function is SECURITY DEFINER + GRANT to authenticated, so no service_role needed.
-      const { data: rpcData, error: rpcErr } = await supabase
-        .rpc("paper_reset", { p_user_id: user.id });
+      const { data: rpcData, error: rpcErr } = await (supabase as any)
+        .rpc("paper_reset", {
+          p_user_id: user.id,
+          p_starting_balance: newStartingBalance ?? null,
+        });
 
       if (!rpcErr) {
         console.info("paper.reset.success", { user_id: user.id, summary: rpcData });
-        // If a new starting balance was requested, update it after reset.
-        // Keep the account paused so the user can start the engine manually.
-        if (newStartingBalance != null) {
-          const { error: updateErr } = await supabase
-            .from("paper_accounts")
-            .update({
-              starting_balance: newStartingBalance,
-              balance:          newStartingBalance,
-              realized_pnl:     0,
-              unrealized_pnl:   0,
-              status:           "paused",
-              started_at:       null,
-              paused_at:        new Date().toISOString(),
-            })
-            .eq("user_id", user.id);
-          if (updateErr) throw updateErr;
-        } else {
-          await supabase
-            .from("paper_accounts")
-            .update({ status: "paused", started_at: null, paused_at: new Date().toISOString() })
-            .eq("user_id", user.id);
-        }
         return rpcData;
       }
 
       // ── RPC failed (function not deployed yet) → dev direct fallback ─────
+      // Do not do a partial direct-write reset. A successful reset must come
+      // from the RPC so paper runtime data and account state clear together.
       console.warn("paper.reset.rpc_failed", {
         user_id: user.id,
         code: rpcErr.code,
@@ -306,9 +289,10 @@ export function usePaperAccountMutations() {
       throw new Error(
         `Paper reset failed: ${rpcErr.message}\n\n` +
         `Edge Function error: ${(efErr as Error)?.message ?? String(efErr)}\n\n` +
-        "A safe reset must delete paper trades and decisions atomically. Deploy/serve the reset backend first:\n" +
+        "A safe reset must clear paper-mode signals, decisions, trades, lifecycle events, and account events atomically. Deploy/serve the reset backend first:\n" +
         "  supabase db push\n" +
-        "  supabase functions serve --no-verify-jwt",
+        "  supabase functions serve --no-verify-jwt\n\n" +
+        "Required migration: supabase/migrations/0016_harden_paper_reset_scope.sql",
       );
     },
     onSuccess: () => {
@@ -316,6 +300,25 @@ export function usePaperAccountMutations() {
       invalidate();
     },
     onError: (err) => console.error("paper.reset.failed", { user_id: user?.id, error: err }),
+  });
+
+  const closeOpen = useMutation({
+    mutationFn: async () => {
+      if (!user?.id) throw new Error("Not signed in.");
+      const { data, error } = await (supabase as any)
+        .rpc("paper_close_open_trades", { p_user_id: user.id });
+      if (error) {
+        throw new Error(
+          `Open paper positions could not be closed: ${error.message}\n\n` +
+          "Deploy the latest database migration first:\n" +
+          "  supabase db push\n\n" +
+          "Required migration: supabase/migrations/0017_paper_close_reason_and_close_all.sql",
+        );
+      }
+      return data as { ok: boolean; closed: number; balance: number; realized_pnl: number };
+    },
+    onSuccess: invalidate,
+    onError: (err) => console.error("paper.close_open.failed", { user_id: user?.id, error: err }),
   });
 
   const start = useMutation({
@@ -408,5 +411,5 @@ export function usePaperAccountMutations() {
     onError: (err) => console.error("paper.pause.failed", { user_id: user?.id, error: err }),
   });
 
-  return { create, reset, start, pause };
+  return { create, reset, start, pause, closeOpen };
 }

@@ -15,6 +15,7 @@ Key design rules:
 from __future__ import annotations
 
 import asyncio
+from datetime import timedelta
 from typing import Optional
 
 from src.config import settings
@@ -33,6 +34,7 @@ from src.db.models import (
 )
 from src.db.supabase_client import get_client
 from src.logging_config import get_logger
+from src.utils.time import utcnow
 from src.utils.time import utcnow_iso
 
 log = get_logger(__name__)
@@ -80,6 +82,65 @@ class TradeLifecycleRepository:
         result = await _run(_select)
         return [r["id"] for r in (result.data or [])]
 
+    async def release_stale_claims(self, max_age_minutes: int) -> int:
+        """
+        Release lifecycle claims left behind by a dead worker.
+
+        Stale monitoring rows are safe to put back to idle. Stale closing rows
+        may have submitted a close order, so they are moved to reconciliation
+        instead of being retried blindly.
+        """
+        if settings.dry_run:
+            return 0
+
+        cutoff = (utcnow() - timedelta(minutes=max_age_minutes)).isoformat()
+
+        def _release_monitoring():
+            return (
+                self._client.table("trades")
+                .update({
+                    "lifecycle_status":          "idle",
+                    "lifecycle_worker_id":       None,
+                    "lifecycle_claimed_at":      None,
+                    "lifecycle_last_checked_at": utcnow_iso(),
+                    "lifecycle_error":           None,
+                })
+                .in_("status", ["pending", "open"])
+                .eq("lifecycle_status", "monitoring")
+                .lt("lifecycle_claimed_at", cutoff)
+                .execute()
+            )
+
+        def _mark_closing_recon():
+            return (
+                self._client.table("trades")
+                .update({
+                    "lifecycle_status":          "needs_reconciliation",
+                    "lifecycle_worker_id":       None,
+                    "lifecycle_claimed_at":      None,
+                    "lifecycle_last_checked_at": utcnow_iso(),
+                    "lifecycle_error": (
+                        "Stale closing claim after worker restart; "
+                        "manual reconciliation required"
+                    ),
+                })
+                .eq("status", "open")
+                .eq("lifecycle_status", "closing")
+                .lt("lifecycle_claimed_at", cutoff)
+                .execute()
+            )
+
+        monitoring = await _run(_release_monitoring)
+        closing = await _run(_mark_closing_recon)
+        released = len(monitoring.data or []) + len(closing.data or [])
+        if released:
+            log.warning(
+                "lifecycle.stale_claims_released",
+                count=released,
+                max_age_minutes=max_age_minutes,
+            )
+        return released
+
     async def claim_for_lifecycle(
         self,
         trade_id: str,
@@ -102,6 +163,23 @@ class TradeLifecycleRepository:
         """
         now = utcnow_iso()
 
+        def _select_current():
+            return (
+                self._client.table("trades")
+                .select("lifecycle_status")
+                .eq("id", trade_id)
+                .in_("status", ["pending", "open"])
+                .in_("lifecycle_status", ["idle", "needs_reconciliation"])
+                .limit(1)
+                .execute()
+            )
+
+        current = await _run(_select_current)
+        if not current.data:
+            log.debug("lifecycle.claim_missed", trade_id=trade_id, worker=worker_id)
+            return None
+        original_lifecycle_status = current.data[0]["lifecycle_status"]
+
         def _update():
             return (
                 self._client.table("trades")
@@ -113,7 +191,7 @@ class TradeLifecycleRepository:
                 })
                 .eq("id", trade_id)
                 .in_("status", ["pending", "open"])
-                .in_("lifecycle_status", ["idle", "needs_reconciliation"])
+                .eq("lifecycle_status", original_lifecycle_status)
                 .execute()
             )
         result = await _run(_update)
@@ -122,6 +200,7 @@ class TradeLifecycleRepository:
             return None
 
         trade = Trade.model_validate(result.data[0])
+        trade.lifecycle_status = original_lifecycle_status
 
         # ── Retry limit enforcement ───────────────────────────────────────────
         # The returned row holds the OLD retry count. Increment + check.
@@ -257,7 +336,6 @@ class TradeLifecycleRepository:
                     "exit_price":       exit_price,
                     "avg_exit_price":   avg_exit_price,
                     "realized_pnl":     realized_pnl,
-                    "pnl":              realized_pnl,
                     "pnl_pct":          pnl_pct,
                     "r_multiple":       r_multiple,
                     "unrealized_pnl":   None,

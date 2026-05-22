@@ -329,14 +329,18 @@ class TradeRepository:
             )
 
         def _insert():
+            payload = trade.model_dump(
+                exclude_none=True,
+                exclude={"agent_run_id"},
+            )
+            if "avg_fill_price" in payload and "avg_entry_price" not in payload:
+                payload["avg_entry_price"] = payload.pop("avg_fill_price")
+            else:
+                payload.pop("avg_fill_price", None)
+            payload.pop("pnl", None)
             return (
                 self._client.table("trades")
-                .insert(
-                    trade.model_dump(
-                        exclude_none=True,
-                        exclude={"agent_run_id"},
-                    )
-                )
+                .insert(payload)
                 .execute()
             )
 

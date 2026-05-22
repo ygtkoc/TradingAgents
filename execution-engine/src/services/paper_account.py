@@ -60,8 +60,9 @@ class PaperAccountService:
         trade_id: Optional[str],
         notional: float,
         symbol: str,
+        reservation_id: Optional[str] = None,
     ) -> bool:
-        """Debit paper_accounts.balance by `notional` and write a ledger
+        """Debit paper_accounts.balance by the requested paper risk reserve and write a ledger
         event. Returns False if balance would go negative.
 
         DB CHECK constraint `balance >= 0` makes the underlying UPDATE fail
@@ -124,7 +125,9 @@ class PaperAccountService:
                         "note":             f"open {symbol}",
                         "metadata":         {
                             "symbol": symbol,
-                            "notional": notional,
+                            "reserve_amount": notional,
+                            "reserve_type": "risk_amount",
+                            "reservation_id": reservation_id,
                             "trade_pending": trade_id is None,
                         },
                     }).execute()
@@ -138,3 +141,121 @@ class PaperAccountService:
                  user_id=user_id, trade_id=trade_id, notional=notional,
                  balance_after=new_balance)
         return True
+
+    async def attach_open_reservation(
+        self,
+        *,
+        user_id: str,
+        trade_id: str,
+        reservation_id: str,
+    ) -> None:
+        """Best-effort: attach the pre-trade reserve ledger row to its trade."""
+        if not reservation_id:
+            return
+        try:
+            def _update():
+                return (
+                    self._client.table("paper_account_events")
+                    .update({"trade_id": trade_id})
+                    .eq("user_id", user_id)
+                    .eq("event_type", "trade_open_reserve")
+                    .is_("trade_id", "null")
+                    .contains("metadata", {"reservation_id": reservation_id})
+                    .execute()
+                )
+            await _run(_update)
+        except Exception as exc:
+            log.error(
+                "paper_account.attach_reservation_failed",
+                user_id=user_id, trade_id=trade_id, error=str(exc)[:200],
+            )
+
+    async def release_open_reservation(
+        self,
+        *,
+        user_id: str,
+        reservation_id: str,
+        symbol: str,
+        reason: str,
+    ) -> None:
+        """Best-effort rollback for a reserve made before trade creation."""
+        if not reservation_id:
+            return
+        try:
+            acct = await self.get_account(user_id)
+            if acct is None:
+                return
+
+            def _events():
+                return (
+                    self._client.table("paper_account_events")
+                    .select("*")
+                    .eq("user_id", user_id)
+                    .eq("event_type", "trade_open_reserve")
+                    .is_("trade_id", "null")
+                    .contains("metadata", {"reservation_id": reservation_id})
+                    .limit(1)
+                    .execute()
+                )
+
+            rows = (await _run(_events)).data or []
+            if not rows:
+                return
+
+            event = rows[0]
+            amount = abs(float(event.get("delta") or 0))
+            if amount <= 0:
+                return
+
+            balance = float(acct.get("balance") or 0)
+            new_balance = balance + amount
+
+            def _update():
+                return (
+                    self._client.table("paper_accounts")
+                    .update({"balance": new_balance})
+                    .eq("id", acct["id"])
+                    .eq("user_id", user_id)
+                    .execute()
+                )
+
+            await _run(_update)
+
+            def _evt():
+                return (
+                    self._client.table("paper_account_events").insert({
+                        "account_id":       acct["id"],
+                        "user_id":          user_id,
+                        "trade_id":         None,
+                        "event_type":       "trade_open_reserve_released",
+                        "delta":            amount,
+                        "realized_delta":   0,
+                        "unrealized_delta": 0,
+                        "balance_after":    new_balance,
+                        "realized_after":   acct.get("realized_pnl") or 0,
+                        "unrealized_after": acct.get("unrealized_pnl") or 0,
+                        "note":             f"release failed open {symbol}",
+                        "metadata":         {
+                            "symbol": symbol,
+                            "reservation_id": reservation_id,
+                            "released_reason": reason[:200],
+                            "released_event_id": event.get("id"),
+                        },
+                    }).execute()
+                )
+
+            await _run(_evt)
+            log.warning(
+                "paper_account.reservation_released",
+                user_id=user_id,
+                reservation_id=reservation_id,
+                amount=amount,
+                reason=reason[:200],
+            )
+        except Exception as exc:
+            log.error(
+                "paper_account.release_reservation_failed",
+                user_id=user_id,
+                reservation_id=reservation_id,
+                error=str(exc)[:300],
+            )

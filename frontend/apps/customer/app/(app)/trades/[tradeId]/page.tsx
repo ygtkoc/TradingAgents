@@ -21,6 +21,7 @@ import { useQuery } from "@tanstack/react-query";
 import { useParams } from "next/navigation";
 
 import { TradeTimeline } from "@/components/trades/trade-timeline";
+import { formatPrice } from "@/lib/format-price";
 import { useAgentOutputs, useDecisionAgentRuns } from "@/lib/hooks/queries/use-decision-detail";
 import { useRiskLogs, useSecurityLogs } from "@/lib/hooks/queries/use-logs";
 import { isFilledPosition, useTrade } from "@/lib/hooks/queries/use-trades";
@@ -51,7 +52,8 @@ export default function TradeDetailPage() {
   }
 
   const isOpen       = isFilledPosition(trade);
-  const pnl          = isOpen
+  const isOpenLike   = isOpen || trade.status === "simulated";
+  const pnl          = isOpenLike
     ? trade.unrealized_pnl ?? trade.pnl ?? 0
     : trade.realized_pnl ?? trade.pnl ?? 0;
   const pnlNum       = Number(pnl);
@@ -60,6 +62,7 @@ export default function TradeDetailPage() {
   const isLoss       = pnlNum < 0;
   const isLong       = trade.direction === "long" || trade.side === "buy";
   const reconcActive = trade.lifecycle_status === "needs_reconciliation";
+  const latestPrice  = toNum(trade.metadata?.latest_price);
 
   const heroGradient = isProfit
     ? "border-success/20 bg-gradient-to-br from-success/5 via-card to-card"
@@ -99,6 +102,8 @@ export default function TradeDetailPage() {
       ) : null}
 
       {/* ── P&L hero ─────────────────────────────────────────────────────────── */}
+      <TradeStatePanel trade={trade} isOpen={isOpenLike} latestPrice={latestPrice} pnl={pnlNum} pnlPct={pnlPct} />
+
       <div className={cn(
         "relative overflow-hidden rounded-2xl border p-6 backdrop-blur-sm",
         heroGradient,
@@ -118,7 +123,7 @@ export default function TradeDetailPage() {
             </div>
             <div>
               <div className="text-[13px] text-muted-foreground/60 uppercase tracking-[0.1em]">
-                {isOpen ? "Unrealized P&L" : "Realized P&L"}
+                {isOpenLike ? "Unrealized P&L" : "Realized P&L"}
               </div>
               <div className={cn(
                 "text-3xl font-bold tabular-nums",
@@ -155,13 +160,13 @@ export default function TradeDetailPage() {
           {/* Quick stats column */}
           <div className="hidden shrink-0 flex-col items-end gap-2 text-right sm:flex">
             {trade.entry_price != null ? (
-              <StatPill label="Entry" value={formatCurrency(trade.entry_price)} />
+              <StatPill label="Entry" value={formatPrice(trade.entry_price)} />
             ) : null}
             {trade.stop_loss != null ? (
-              <StatPill label="Stop loss" value={formatCurrency(trade.stop_loss)} color="text-destructive" />
+              <StatPill label="Stop loss" value={formatPrice(trade.stop_loss)} color="text-destructive" />
             ) : null}
             {trade.take_profit != null ? (
-              <StatPill label="Take profit" value={formatCurrency(trade.take_profit)} color="text-success" />
+              <StatPill label="Take profit" value={formatPrice(trade.take_profit)} color="text-success" />
             ) : null}
           </div>
         </div>
@@ -175,11 +180,11 @@ export default function TradeDetailPage() {
             trade.filled_quantity != null
               ? { label: "Filled",    value: formatNumber(trade.filled_quantity, 8) }
               : null,
-            trade.avg_fill_price != null
-              ? { label: "Avg fill",  value: formatCurrency(trade.avg_fill_price) }
+            trade.avg_fill_price != null || trade.avg_entry_price != null
+              ? { label: "Avg fill",  value: formatPrice(Number(trade.avg_fill_price ?? trade.avg_entry_price)) }
               : null,
             trade.trailing_stop_price != null
-              ? { label: "Trail stop", value: formatCurrency(trade.trailing_stop_price) }
+              ? { label: "Trail stop", value: formatPrice(trade.trailing_stop_price) }
               : null,
             trade.exchange_order_id
               ? { label: "Order ID",  value: trade.exchange_order_id, mono: true }
@@ -290,6 +295,86 @@ export default function TradeDetailPage() {
 
 // ── Sub-components ─────────────────────────────────────────────────────────────
 
+function TradeStatePanel({
+  trade,
+  isOpen,
+  latestPrice,
+  pnl,
+  pnlPct,
+}: {
+  trade: Trade;
+  isOpen: boolean;
+  latestPrice: number | null;
+  pnl: number;
+  pnlPct: number | null;
+}) {
+  const filledQty = toNum(trade.filled_quantity) ?? toNum(trade.quantity) ?? 0;
+  const entry = toNum(trade.avg_fill_price ?? trade.avg_entry_price ?? trade.entry_price);
+  const notional = toNum(trade.notional) ?? (entry != null ? entry * filledQty : null);
+  const statusText = trade.status === "closed"
+    ? `Closed${trade.close_reason ? ` - ${trade.close_reason.replace(/_/g, " ")}` : ""}`
+    : isOpen
+      ? "Open and monitoring"
+      : trade.status === "pending"
+        ? "Waiting for fill"
+        : trade.status.replace(/_/g, " ");
+  const pnlTone = pnl > 0 ? "text-success" : pnl < 0 ? "text-destructive" : "text-foreground";
+
+  return (
+    <div className="grid gap-3 md:grid-cols-4">
+      <StateTile
+        label="Position"
+        value={statusText}
+        detail={trade.lifecycle_status.replace(/_/g, " ")}
+        tone={trade.status === "closed" ? "muted" : isOpen ? "success" : "warning"}
+      />
+      <StateTile
+        label="Latest price"
+        value={latestPrice != null ? formatPrice(latestPrice) : "Waiting"}
+        detail={latestPrice != null ? "Live ticker" : "No fresh price"}
+      />
+      <StateTile
+        label="Live P&L"
+        value={`${pnl >= 0 ? "+" : ""}${formatCurrency(pnl)}`}
+        detail={pnlPct != null ? `${pnlPct >= 0 ? "+" : ""}${pnlPct.toFixed(2)}%` : "percent pending"}
+        className={pnlTone}
+      />
+      <StateTile
+        label="Exposure / risk"
+        value={notional != null ? formatCurrency(notional) : "-"}
+        detail={trade.risk_amount != null ? `Risk ${formatCurrency(Number(trade.risk_amount))}` : "Risk not recorded"}
+      />
+    </div>
+  );
+}
+
+function StateTile({
+  label,
+  value,
+  detail,
+  tone,
+  className,
+}: {
+  label: string;
+  value: string;
+  detail: string;
+  tone?: "success" | "warning" | "muted";
+  className?: string;
+}) {
+  return (
+    <div className={cn(
+      "rounded-xl border border-border/40 bg-card/50 px-4 py-3",
+      tone === "success" && "border-success/25 bg-success/5",
+      tone === "warning" && "border-warning/25 bg-warning/5",
+      tone === "muted" && "bg-muted/20",
+    )}>
+      <div className="text-[9px] font-semibold uppercase tracking-[0.12em] text-muted-foreground/60">{label}</div>
+      <div className={cn("mt-1 text-[14px] font-semibold text-foreground", className)}>{value}</div>
+      <div className="mt-0.5 text-[11px] text-muted-foreground">{detail}</div>
+    </div>
+  );
+}
+
 function TradingViewPosition({
   trade, pnl, pnlPct,
 }: {
@@ -297,11 +382,10 @@ function TradingViewPosition({
   pnl: number;
   pnlPct: number | null;
 }) {
-  const candles = useTradeCandles(trade);
   const tvSymbol = `${trade.exchange.toUpperCase()}:${trade.symbol.replace("/", "")}`;
+  const widgetUrl = `https://s.tradingview.com/widgetembed/?symbol=${encodeURIComponent(tvSymbol)}&interval=1&hidesidetoolbar=1&symboledit=0&saveimage=0&toolbarbg=f1f3f6&studies=[]&theme=dark&style=1&timezone=Etc%2FUTC&withdateranges=1&hideideas=1`;
   const latestPrice = toNum(trade.metadata?.latest_price);
   const isLong = trade.direction === "long" || trade.side === "buy";
-  const range = priceRange(trade, candles.data ?? []);
   const levels = [
     trade.take_profit != null ? { label: "TP", price: Number(trade.take_profit), tone: "text-success border-success/30 bg-success/10" } : null,
     { label: "ENTRY", price: Number(trade.entry_price), tone: "text-primary border-primary/30 bg-primary/10" },
@@ -324,7 +408,12 @@ function TradingViewPosition({
       </CardHeader>
       <CardContent>
         <div className="relative h-[520px] overflow-hidden rounded-xl border border-border/40 bg-card">
-          <PositionSvg candles={candles.data ?? []} levels={levels} range={range} />
+          <iframe
+            title={`${tvSymbol} TradingView chart`}
+            src={widgetUrl}
+            className="h-full w-full"
+            allowFullScreen
+          />
           <div className="pointer-events-none absolute left-4 top-4 rounded-lg border border-border/50 bg-background/90 px-3 py-2 text-[12px] shadow-lg backdrop-blur">
             <div className="font-mono font-semibold text-foreground">{tvSymbol}</div>
             <div className={cn(
@@ -335,11 +424,13 @@ function TradingViewPosition({
               {pnlPct != null ? ` (${pnlPct >= 0 ? "+" : ""}${pnlPct.toFixed(2)}%)` : ""}
             </div>
           </div>
-          {candles.isLoading ? (
-            <div className="absolute inset-0 grid place-items-center text-[12px] text-muted-foreground">
-              Loading candles...
-            </div>
-          ) : null}
+          <div className="pointer-events-none absolute right-4 top-4 flex flex-col gap-1">
+            {levels.map((level) => (
+              <div key={level.label} className={cn("rounded-md border px-2 py-1 text-right text-[10px] font-bold tabular-nums shadow-lg backdrop-blur", level.tone)}>
+                {level.label} {formatPrice(level.price)}
+              </div>
+            ))}
+          </div>
         </div>
       </CardContent>
     </Card>
@@ -450,7 +541,7 @@ function PositionSvg({
             <foreignObject x={width - right + 12} y={ly - 18} width={right - 24} height="36">
               <div className={cn("rounded-md border px-2 py-1 text-right text-[10px] font-bold tabular-nums shadow-lg backdrop-blur", level.tone)}>
                 <div>{level.label}</div>
-                <div>{formatCurrency(level.price)}</div>
+                <div>{formatPrice(level.price)}</div>
               </div>
             </foreignObject>
           </g>

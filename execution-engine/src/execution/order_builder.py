@@ -140,12 +140,20 @@ class OrderBuilder:
         """
         Quantity priority:
           1. risk_summary.quantity (agent-specified)
-          2. risk_summary.position_size_pct applied to portfolio_value_usd
-          3. fallback: 1% of portfolio at current price (minimal safe default)
+          2. risk_summary.risk_amount sized against stop_loss
+          3. risk_summary.position_size_pct applied to portfolio_value_usd
+          4. fallback: 1% of portfolio at current price (minimal safe default)
         """
         explicit_qty = self._get_float(decision.risk_summary, "quantity")
         if explicit_qty and explicit_qty > 0:
             return explicit_qty
+
+        risk_amount = self._get_float(decision.risk_summary, "risk_amount")
+        stop_loss = self._get_float(decision.risk_summary, "stop_loss")
+        if risk_amount and risk_amount > 0 and stop_loss and stop_loss > 0:
+            stop_distance = abs(entry_price - stop_loss)
+            if stop_distance > 0:
+                return round(risk_amount / stop_distance, 8)
 
         size_pct = self._get_float(decision.risk_summary, "position_size_pct")
         if size_pct and size_pct > 0 and entry_price > 0:

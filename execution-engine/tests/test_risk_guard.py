@@ -141,18 +141,45 @@ class TestPositionSize:
         check = next(c for c in result.checks if c.name == "position_size_pct")
         assert check.passed
 
-    def test_oversized_position_blocks(self):
-        # $500 / $1,000 = 50% → exceeds 10% limit
+    def test_wallet_risk_sizing_allows_large_notional_when_risk_is_bounded(self):
+        # $500 / $1,000 = 50% notional is allowed when stop-loss risk remains bounded.
         bot = make_bot(max_position_size_pct=10.0)
         result = _run(bot=bot, quantity=0.01, entry_price=50_000.0, portfolio_value_usd=1_000.0)
         check = next(c for c in result.checks if c.name == "position_size_pct")
-        assert not check.passed
+        assert check.passed
         assert result.blocked
 
     def test_zero_portfolio_blocks(self):
         result = _run(portfolio_value_usd=0.0)
         check = next(c for c in result.checks if c.name == "position_size_pct")
         assert not check.passed
+
+    def test_futures_profile_allows_full_notional_for_wallet_risk(self):
+        bot = make_bot(
+            max_position_size_pct=5.0,
+            risk_per_trade_pct=1.0,
+            risk_model="percentage",
+            risk_value=2.0,
+            metadata={"trading_system": "futures_trading"},
+        )
+        decision = make_decision(
+            risk_summary={"entry_price": 100.0, "stop_loss": 98.0}
+        )
+        result = _run(
+            decision=decision,
+            bot=bot,
+            quantity=10.0,
+            entry_price=100.0,
+            portfolio_value_usd=1_000.0,
+            market_snapshot=make_market_snapshot(close_price=100.0),
+        )
+
+        position = next(c for c in result.checks if c.name == "position_size_pct")
+        risk = next(c for c in result.checks if c.name == "risk_per_trade")
+
+        assert position.passed
+        assert risk.passed
+        assert not result.blocked
 
 
 class TestStopLossRequired:
@@ -198,14 +225,15 @@ class TestStopLossRequired:
         assert not check.passed
         assert result.blocked
 
-    def test_paper_without_stop_loss_passes(self):
+    def test_paper_without_stop_loss_blocks(self):
         decision = make_decision(
             mode="paper",
             risk_summary={"entry_price": 50000.0, "quantity": 0.01},  # no stop_loss
         )
         result = _run(decision=decision)
         check = next(c for c in result.checks if c.name == "stop_loss_required")
-        assert check.passed
+        assert not check.passed
+        assert result.blocked
 
 
 class TestPriceSlippage:

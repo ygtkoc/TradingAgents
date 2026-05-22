@@ -29,6 +29,7 @@ export const UserSettingsUpdateSchema = z.object({
   trading_enabled:       z.boolean().optional(),
   daily_loss_limit_usd:  z.number().nonnegative().nullable().optional(),
   max_concurrent_trades: z.number().int().nonnegative().nullable().optional(),
+  default_risk_per_trade_pct: z.number().min(0.1).max(10).nullable().optional(),
 });
 export type UserSettingsUpdateInput = z.infer<typeof UserSettingsUpdateSchema>;
 

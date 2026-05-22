@@ -23,12 +23,6 @@ const STRATEGIES: { value: CreateBotInput["strategy"]; label: string; blurb: str
   { value: "balanced",        label: "Balanced",        blurb: "Mix of momentum and mean reversion." },
 ];
 
-const RISK_LEVELS: { value: CreateBotInput["risk_level"]; label: string; blurb: string }[] = [
-  { value: "conservative", label: "Conservative", blurb: "Small position size, tight stops." },
-  { value: "moderate",     label: "Moderate",     blurb: "Default sizing for paper testing." },
-  { value: "aggressive",   label: "Aggressive",   blurb: "Larger size, wider stops." },
-];
-
 const SYSTEMS: { value: CreateBotInput["trading_system"]; label: string; blurb: string }[] = [
   { value: "futures_trading", label: "Futures trading", blurb: "Slower RR-based directional trades." },
   { value: "portfolio_management", label: "Portfolio management", blurb: "Small wallet-protection rebalances." },
@@ -203,27 +197,11 @@ export default function NewBotPage() {
               ))}
             </div>
 
-            <div className="grid gap-2 sm:grid-cols-3">
-              {RISK_LEVELS.map((r) => (
-                <button
-                  key={r.value}
-                  type="button"
-                  onClick={() => update("risk_level", r.value)}
-                  className={cn(
-                    "rounded-lg border bg-card/40 p-3 text-left transition-all hover:bg-accent/40",
-                    form.risk_level === r.value && "border-primary bg-primary/10 ring-1 ring-primary/30",
-                  )}
-                >
-                  <div className="text-sm font-medium">{r.label}</div>
-                  <div className="text-xs text-muted-foreground">{r.blurb}</div>
-                </button>
-              ))}
-            </div>
           </CardContent>
         </Card>
 
         {/* ── Risk model ─────────────────────────────────────────────────── */}
-        <Card>
+        <Card className="hidden">
           <CardHeader>
             <CardTitle className="text-base">Risk model</CardTitle>
             <CardDescription>How much of the account balance is risked on each trade.</CardDescription>
@@ -279,11 +257,9 @@ export default function NewBotPage() {
         <Card>
           <CardHeader>
             <CardTitle className="text-base">Sizing &amp; protective stops</CardTitle>
-            <CardDescription>Per-trade caps in percent of the paper account equity.</CardDescription>
+            <CardDescription>Protective stops and signal timeframe. Wallet risk is configured in Settings.</CardDescription>
           </CardHeader>
           <CardContent className="grid gap-4 sm:grid-cols-2">
-            <NumberField label="Max position size (%)" value={form.max_position_size_pct} step={0.5} min={0.5} max={50}
-              onChange={(n) => update("max_position_size_pct", n)} />
             <NumberField label="Stop loss (%)"   value={form.stop_loss_pct}  step={0.1} min={0.1} max={20}
               onChange={(n) => update("stop_loss_pct", n)} />
             <NumberField label="Take profit (%)" value={form.take_profit_pct} step={0.1} min={0.1} max={50}

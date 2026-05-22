@@ -14,6 +14,20 @@ main > * {
   animation: page-in 0.25s ease-out both;
 }
 
+@keyframes ticker-scroll {
+  from { transform: translateX(0); }
+  to   { transform: translateX(-50%); }
+}
+
+.ticker-marquee {
+  animation: ticker-scroll 28s linear infinite;
+  will-change: transform;
+}
+
+.ticker-marquee:hover {
+  animation-play-state: paused;
+}
+
 /* Noise texture overlay for depth (subtle) */
 .dark body::before {
   content: '';

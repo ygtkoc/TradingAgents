@@ -36,7 +36,7 @@ export function AppShell({ sidebar, topBar, banner, children, className }: AppSh
 
         {/* Topbar */}
         {topBar ? (
-          <header className="sticky top-0 z-20 flex h-14 shrink-0 items-center border-b border-border/40 bg-background/70 px-5 backdrop-blur-xl">
+          <header className="sticky top-0 z-20 flex shrink-0 flex-col border-b border-border/40 bg-background/70 px-5 backdrop-blur-xl">
             {topBar}
           </header>
         ) : null}

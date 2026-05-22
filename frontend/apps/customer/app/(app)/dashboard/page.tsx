@@ -162,13 +162,11 @@ export default function DashboardPage() {
   const start       = a ? Number(a.starting_balance) : 0;
   const rawAccountRealized = a ? Number(a.realized_pnl ?? 0) : 0;
   const rawAccountUnrealized = a ? Number(a.unrealized_pnl ?? 0) : 0;
-  const accountRealized = rawAccountRealized !== 0 ? rawAccountRealized : realized;
-  const accountUnrealized = rawAccountUnrealized !== 0 ? rawAccountUnrealized : unrealized;
+  const accountRealized = rawAccountRealized === 0 && realized !== 0 ? realized : rawAccountRealized;
+  const accountUnrealized = rawAccountUnrealized === 0 && unrealized !== 0 ? unrealized : rawAccountUnrealized;
   const accountBalance = a ? Number(a.balance ?? 0) : 0;
   const accountEquity = a ? Number(a.equity ?? 0) : 0;
-  const equityValue = accountBalance > 0
-    ? accountBalance + accountUnrealized
-    : accountEquity;
+  const equityValue = accountEquity > 0 ? accountEquity : accountBalance + accountUnrealized;
   const change      = start > 0 ? ((equityValue - start) / start) * 100 : 0;
   const isPositive  = change >= 0;
   const acctStatus  = a?.status ?? "inactive";

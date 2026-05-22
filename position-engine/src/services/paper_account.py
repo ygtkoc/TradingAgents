@@ -6,7 +6,7 @@ local module instead of sharing code, to avoid coupling the engines through a
 shared Python package.
 
 Settlement math:
-    reserved_returned = trade.risk_amount             (the original reservation)
+    reserved_returned = trade.metadata.reserved_amount (the original reservation)
     realised_pnl      = (exit - entry) * qty * sign(direction)
     delta             = reserved_returned + realised_pnl
 

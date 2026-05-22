@@ -50,6 +50,7 @@ from src.guards.security_guard import SecurityExecutionGuard
 from src.logging_config import get_logger
 from src.services.market_data import MarketDataService
 from src.services.notifications import NotificationService
+from src.services.paper_account import PaperAccountService
 from src.services.recovery import RecoveryService
 
 log = get_logger(__name__)
@@ -75,6 +76,7 @@ class ExecutionEngine:
         self._market_data = MarketDataService()
         self._notifications = NotificationService()
         self._recovery = RecoveryService()
+        self._paper_account = PaperAccountService()
         self._paper_executor = PaperExecutor()
         self._shadow_executor = ShadowExecutor()
         self._live_executor = LiveExecutor()
@@ -159,12 +161,19 @@ class ExecutionEngine:
 
             platform_settings = PlatformSettings()
 
-        portfolio_value_usd = self._get_portfolio_value(
+        portfolio_value_usd = await self._get_portfolio_value(
             exchange_account=exchange_account,
             user_settings=user_settings,
             market_snapshot=market_snapshot,
             decision=decision,
             execution_mode=execution_mode,
+        )
+        self._enrich_missing_risk_summary(
+            decision=decision,
+            bot=bot,
+            market_snapshot=market_snapshot,
+            portfolio_value_usd=portfolio_value_usd,
+            user_settings=user_settings,
         )
 
         if is_live:
@@ -361,7 +370,7 @@ class ExecutionEngine:
             return "shadow"
         return "live"
 
-    def _get_portfolio_value(
+    async def _get_portfolio_value(
         self,
         *,
         exchange_account: Optional[ExchangeAccount],
@@ -371,6 +380,15 @@ class ExecutionEngine:
         execution_mode: str,
     ) -> float:
         if execution_mode in ("paper", "shadow"):
+            acct = await self._paper_account.get_account(decision.user_id)
+            if acct:
+                for key in ("equity", "balance", "starting_balance"):
+                    try:
+                        value = float(acct.get(key) or 0)
+                    except (TypeError, ValueError):
+                        value = 0.0
+                    if value > 0:
+                        return value
             return settings.paper_portfolio_value_usd
         return settings.paper_portfolio_value_usd
 
@@ -405,6 +423,85 @@ class ExecutionEngine:
             size_pct = float(risk.get("position_size_pct", 1.0))
             return (portfolio_value * size_pct / 100.0) / entry_price
         return 0.0
+
+    def _enrich_missing_risk_summary(
+        self,
+        *,
+        decision: TradeDecision,
+        bot: Optional[Bot],
+        market_snapshot: Optional[MarketSnapshot],
+        portfolio_value_usd: float,
+        user_settings: Optional[UserSettings] = None,
+    ) -> None:
+        if bot is None:
+            return
+
+        risk = dict(decision.risk_summary or {})
+        entry_price = self._estimate_entry_price(decision, market_snapshot)
+        if entry_price <= 0 or portfolio_value_usd <= 0:
+            return
+
+        def num(value, fallback: Optional[float] = None) -> Optional[float]:
+            try:
+                if value is None:
+                    return fallback
+                return float(value)
+            except (TypeError, ValueError):
+                return fallback
+
+        is_short = decision.final_decision == "open_short" or decision.direction == "short"
+        metadata = bot.metadata or {}
+        stop_loss_pct = num(metadata.get("stop_loss_pct"), 2.0)
+        take_profit_pct = num(metadata.get("take_profit_pct"))
+        risk_reward_ratio = num(risk.get("risk_reward_ratio"), num(bot.risk_reward_ratio, 2.0)) or 2.0
+
+        if not risk.get("entry_price"):
+            risk["entry_price"] = entry_price
+
+        if not risk.get("stop_loss") and stop_loss_pct and stop_loss_pct > 0:
+            distance = entry_price * (stop_loss_pct / 100.0)
+            risk["stop_loss"] = entry_price + distance if is_short else entry_price - distance
+
+        if not risk.get("take_profit"):
+            if take_profit_pct and take_profit_pct > 0:
+                tp_distance = entry_price * (take_profit_pct / 100.0)
+            elif risk.get("stop_loss"):
+                tp_distance = abs(entry_price - float(risk["stop_loss"])) * risk_reward_ratio
+            else:
+                tp_distance = 0
+            if tp_distance > 0:
+                risk["take_profit"] = entry_price - tp_distance if is_short else entry_price + tp_distance
+
+        risk_pct = num(
+            getattr(user_settings, "default_risk_per_trade_pct", None),
+            None,
+        )
+        if risk_pct is None or risk_pct <= 0:
+            risk_pct = num(bot.risk_value if bot.risk_model == "percentage" else bot.risk_per_trade_pct)
+        if risk_pct is None or risk_pct <= 0:
+            risk_pct = 2.0
+        max_risk_amount = portfolio_value_usd * (risk_pct / 100.0)
+
+        stop_loss = num(risk.get("stop_loss"))
+        stop_distance = abs(entry_price - stop_loss) if stop_loss else 0.0
+        risk_qty = max_risk_amount / stop_distance if stop_distance > 0 else None
+        is_futures_profile = str(metadata.get("trading_system") or "") == "futures_trading"
+        max_position_pct = 100.0
+        max_position_qty = (portfolio_value_usd * (max_position_pct / 100.0)) / entry_price
+
+        qty_candidates = [q for q in (risk_qty, max_position_qty) if q and q > 0]
+        if not risk.get("quantity") and qty_candidates:
+            quantity = min(qty_candidates)
+            risk["quantity"] = round(quantity, 8)
+            risk["risk_amount"] = round(stop_distance * quantity, 8) if stop_distance > 0 else max_risk_amount
+            risk["risk_percent"] = round((float(risk["risk_amount"]) / portfolio_value_usd) * 100.0, 6)
+            risk["position_size_pct"] = round(((quantity * entry_price) / portfolio_value_usd) * 100.0, 6)
+        else:
+            risk.setdefault("risk_amount", max_risk_amount)
+            risk.setdefault("risk_percent", risk_pct)
+
+        risk.setdefault("risk_reward_ratio", risk_reward_ratio)
+        decision.risk_summary = risk
 
     async def _dispatch_execution(
         self,

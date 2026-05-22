@@ -389,18 +389,22 @@ def _trading_system(bot_dict: dict[str, Any], bot: "Bot") -> str:
 def _risk_profile(bot_dict: dict[str, Any], bot: "Bot") -> dict[str, float]:
     if _trading_system(bot_dict, bot) == "portfolio_management":
         return {
-            "max_risk_pct": 0.5,
+            "max_risk_pct": 10.0,
             "min_stop_pct": 3.0,
             "max_stop_pct": 18.0,
             "min_rr": 1.2,
-            "max_position_pct": min(float(bot.max_position_size_pct or 5.0), 3.0),
+            "max_position_pct": 100.0,
         }
     return {
-        "max_risk_pct": 2.0,
+        "max_risk_pct": 10.0,
         "min_stop_pct": 1.5,
         "max_stop_pct": 12.0,
         "min_rr": 2.0,
-        "max_position_pct": min(float(bot.max_position_size_pct or 10.0), 10.0),
+        # Futures paper sizing is risk-based: a 2% account risk with a ~2%
+        # stop naturally needs close to 100% notional exposure. A small
+        # position-size cap silently shrinks the trade and makes the stored
+        # risk_amount lie, so keep this cap at least 100% for this profile.
+        "max_position_pct": 100.0,
     }
 
 
@@ -478,8 +482,14 @@ async def _execute_paper_trade(
         bot_dict_exec    = state.get("bot") or {}
         trading_system   = _trading_system(bot_dict_exec, bot)
         risk_profile     = _risk_profile(bot_dict_exec, bot)
-        risk_model       = str(bot_dict_exec.get("risk_model") or "percentage")
-        risk_value_raw   = bot_dict_exec.get("risk_value") or bot.risk_per_trade_pct or 2.0
+        user_settings_exec = state.get("user_settings") or {}
+        risk_model       = "percentage"
+        risk_value_raw   = (
+            user_settings_exec.get("default_risk_per_trade_pct")
+            or bot_dict_exec.get("risk_value")
+            or bot.risk_per_trade_pct
+            or 2.0
+        )
         risk_value       = float(risk_value_raw)
         risk_reward_ratio = max(
             float(bot_dict_exec.get("risk_reward_ratio") or bot.risk_reward_ratio or 2.0),
@@ -518,16 +528,24 @@ async def _execute_paper_trade(
             take_profit = entry_price - stop_dist_abs * risk_reward_ratio
 
         # Position size: risk_amount / stop_distance_per_unit
+        intended_risk_amount = risk_amount
         position_qty  = risk_amount / stop_dist_abs if stop_dist_abs > 0 else 0.0
         # Cap to max position size %
         max_pos_pct   = risk_profile["max_position_pct"]
         max_qty       = (balance * max_pos_pct / 100.0) / entry_price
+        uncapped_qty  = position_qty
         position_qty  = min(position_qty, max_qty)
 
         if position_qty <= 0:
             reason = "Computed position size is zero or negative"
             await _paper_exec_repo.mark_decision_failed(decision_id, reason, worker_id)
             return
+
+        capped_by_position_size = position_qty < uncapped_qty
+        actual_risk_amount = stop_dist_abs * position_qty
+        if capped_by_position_size:
+            risk_amount = actual_risk_amount
+            risk_pct = (risk_amount / balance * 100.0) if balance > 0 else 0.0
 
         notional        = entry_price * position_qty
         expected_reward = risk_amount * risk_reward_ratio
@@ -563,6 +581,11 @@ async def _execute_paper_trade(
                 "worker_id":        worker_id,
                 "trading_system":   trading_system,
                 "risk_profile":     risk_profile,
+                "intended_risk_amount": intended_risk_amount,
+                "actual_risk_amount":   actual_risk_amount,
+                "position_size_capped": capped_by_position_size,
+                "uncapped_quantity":    uncapped_qty,
+                "max_quantity":         max_qty,
                 "reserved_on_open":  False,
                 "paper_fill_status": "filled",
             },
