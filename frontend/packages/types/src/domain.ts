@@ -187,6 +187,8 @@ export interface UserSettings {
   daily_loss_limit_usd:           number | null;
   max_concurrent_trades:          number | null;
   default_risk_per_trade_pct?:    number | null;
+  max_reward_r?:                  number | null;
+  min_reward_r?:                  number | null;
 }
 
 // ── Exchange account (frontend reads via SAFE view; never raw key columns) ───
@@ -269,6 +271,72 @@ export interface Signal {
 }
 
 // ── Logs ─────────────────────────────────────────────────────────────────────
+export interface TelegramSignalSource {
+  id:                     UUID;
+  user_id:                UUID;
+  bot_id:                 UUID;
+  telegram_account_id:    UUID | null;
+  chat_id:                string;
+  chat_title:             string | null;
+  topic_id:               string | null;
+  topic_title:            string | null;
+  exchange:               string;
+  enabled:                boolean;
+  execution_policy:       "observe" | "paper" | "approval_required" | "auto";
+  require_stop_loss:      boolean;
+  max_signal_age_minutes: number;
+  min_parse_confidence:   number;
+  max_leverage:           number | null;
+  default_leverage:       number | null;
+  symbol_allowlist:       string[];
+  metadata:               Record<string, unknown>;
+  created_at:             ISO8601;
+  updated_at:             ISO8601 | null;
+}
+
+export interface TelegramAccount {
+  id:                UUID;
+  user_id:           UUID;
+  account_label:     string;
+  phone_hint:        string | null;
+  connection_status: "pending" | "connected" | "paused" | "error" | "revoked";
+  last_error:        string | null;
+  last_connected_at: ISO8601 | null;
+  metadata:          Record<string, unknown>;
+  created_at:        ISO8601;
+  updated_at:        ISO8601 | null;
+}
+
+export interface TelegramChatOption {
+  id:                  UUID;
+  user_id:             UUID;
+  telegram_account_id: UUID | null;
+  chat_id:             string;
+  chat_title:          string;
+  chat_type:           string;
+  has_topics:          boolean;
+  topic_id:            string | null;
+  topic_title:         string | null;
+  metadata:            Record<string, unknown>;
+  discovered_at:       ISO8601;
+  updated_at:          ISO8601 | null;
+}
+
+export interface TelegramSignalMessage {
+  id:                  UUID;
+  source_id:           UUID;
+  user_id:             UUID;
+  telegram_message_id: string;
+  raw_text:            string;
+  normalized_signal:   Record<string, unknown>;
+  parse_status:        "pending" | "parsed" | "ignored" | "rejected" | "signal_created" | "failed";
+  parse_error:         string | null;
+  signal_id:           UUID | null;
+  received_at:         ISO8601;
+  created_at:          ISO8601;
+  updated_at:          ISO8601 | null;
+}
+
 export interface RiskLog {
   id:                UUID;
   user_id:           UUID | null;
@@ -327,6 +395,8 @@ export interface Notification {
   title:      string;
   body:       string;
   read:       boolean;
+  related_table?: string | null;
+  related_id?: UUID | null;
   metadata:   Record<string, unknown>;
   created_at: ISO8601;
 }

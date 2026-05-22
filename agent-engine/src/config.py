@@ -42,6 +42,10 @@ class Settings(BaseSettings):
     # Safe for development / testing without polluting production data.
     dry_run: bool = False
 
+    # Paper execution has a dedicated execution-engine service. Keeping this
+    # disabled prevents two workers from racing to claim the same decision.
+    enable_inline_paper_execution: bool = False
+
     # ── Worker identity ─────────────────────────────────────────────────────
     # Unique per process; used as processing_worker_id on signals to prevent
     # double-processing when running multiple replicas.

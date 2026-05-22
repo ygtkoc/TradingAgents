@@ -1,6 +1,6 @@
 # Autonomous Paper-Trading Driver
 
-This service makes the TradingAgents platform self-driving for paper trading.
+This service makes the lucrandos platform self-driving for paper trading.
 It runs in front of the three engines (agent · execution · position) and
 provides the inputs they need to produce trades without manual interaction.
 

@@ -17,6 +17,11 @@ import { supabase } from "../../supabase/client";
 import { useCurrentUser } from "./use-current-user";
 import { enrichLivePnl } from "./use-trades";
 
+function normalizeTradeEvent(row: TradeEvent): TradeEvent {
+  const details = (row.details ?? row.metadata ?? {}) as Record<string, unknown>;
+  return { ...row, details, metadata: (row.metadata ?? details) as Record<string, unknown> };
+}
+
 function normalizeAgentOutput(row: Record<string, unknown>): AgentOutput {
   const output = (row.output as Record<string, unknown> | null) ?? {};
   const definition = (row.agent_definitions as Record<string, unknown> | null) ?? {};
@@ -184,14 +189,14 @@ export function useTradeEventsForDecision(decisionId: string | null | undefined)
       if (!decisionId) return [];
       const { data, error } = await supabase
         .from("trade_events")
-        .select("id, trade_id, trade_decision_id, bot_id, user_id, event_type, metadata, created_at")
+        .select("*")
         .eq("trade_decision_id", decisionId)
         .order("created_at", { ascending: true });
       if (error) {
         console.error("decision.detail.trade_events.failed", { decision_id: decisionId, error });
         throw error;
       }
-      return (data ?? []) as TradeEvent[];
+      return ((data ?? []) as TradeEvent[]).map(normalizeTradeEvent);
     },
   });
 }

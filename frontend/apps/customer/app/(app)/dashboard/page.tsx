@@ -71,7 +71,7 @@ export default function DashboardPage() {
     return (
       <div className="mx-auto flex max-w-3xl flex-col gap-6">
         <PageHeader
-          title="Welcome to TradingAgents"
+          title="Welcome to lucrandos"
           description="Run a multi-agent AI trading simulation against live Binance market data."
         />
 
@@ -165,6 +165,10 @@ export default function DashboardPage() {
   const accountRealized = rawAccountRealized === 0 && realized !== 0 ? realized : rawAccountRealized;
   const accountUnrealized = rawAccountUnrealized === 0 && unrealized !== 0 ? unrealized : rawAccountUnrealized;
   const accountBalance = a ? Number(a.balance ?? 0) : 0;
+  const availableBalance = a
+    ? Number(a.available_balance ?? (Number(a.balance ?? 0) - Number(a.reserved_balance ?? 0)))
+    : 0;
+  const reservedBalance = a ? Number(a.reserved_balance ?? 0) : 0;
   const accountEquity = a ? Number(a.equity ?? 0) : 0;
   const equityValue = accountEquity > 0 ? accountEquity : accountBalance + accountUnrealized;
   const change      = start > 0 ? ((equityValue - start) / start) * 100 : 0;
@@ -206,7 +210,7 @@ export default function DashboardPage() {
       />
 
       {/* ── KPI strip ───────────────────────────────────────────────────────── */}
-      <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-6">
+      <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-7">
         <KpiCard
           label="Equity"
           value={formatCurrency(equityValue)}
@@ -225,8 +229,13 @@ export default function DashboardPage() {
           }
         />
         <KpiCard
-          label="Balance"
-          value={formatCurrency(a ? Number(a.balance) : 0)}
+          label="Available"
+          value={formatCurrency(availableBalance)}
+          loading={isLoading}
+        />
+        <KpiCard
+          label="In trades"
+          value={formatCurrency(reservedBalance)}
           loading={isLoading}
         />
         <KpiCard

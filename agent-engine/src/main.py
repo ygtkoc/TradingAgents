@@ -37,13 +37,14 @@ from src.db.repositories import (
     SystemEvolutionRepository,
     TradeDecisionRepository,
 )
-from src.db.supabase_client import log_startup_auth, run_startup_self_test
+from src.db.supabase_client import get_client, log_startup_auth, run_startup_self_test
 from src.logging_config import get_logger
 from src.orchestration.graph import TradingPipeline
 from src.orchestration.state import PipelineState
 from src.orchestration.veto import collect_all_flags, derive_severity_from_flags
 from src.queue.polling import PollingConsumer
 from src.services.metadata import sanitize_metadata
+from src.services.reward_plan import build_reward_plan, final_take_profit
 from src.services.notifications import (
     notify_pipeline_error,
     notify_trade_decision,
@@ -63,6 +64,46 @@ _risk_log_repo = RiskLogRepository()
 _security_log_repo = SecurityLogRepository()
 _signal_repo = SignalRepository()
 _evolution_repo = SystemEvolutionRepository()
+
+
+def _num(value: Any) -> Optional[float]:
+    try:
+        if value is None:
+            return None
+        return float(value)
+    except (TypeError, ValueError):
+        return None
+
+
+def _external_signal_risk(sig: Signal) -> dict[str, Any]:
+    """Extract safe numeric trade parameters from external signal metadata."""
+    meta = sig.metadata or {}
+    if meta.get("source") != "telegram":
+        return {}
+
+    entry = _num(meta.get("entry_price"))
+    stop_loss = _num(meta.get("stop_loss"))
+    take_profits = meta.get("take_profits")
+    take_profit = None
+    if isinstance(take_profits, list) and take_profits:
+        take_profit = _num(take_profits[0])
+
+    risk: dict[str, Any] = {
+        "external_source": "telegram",
+        "sizing_model": "external_signal_with_engine_risk",
+        "order_type": "market",
+        "margin_mode": "cross",
+        "leverage_policy": "exchange_max_allowed",
+    }
+    if entry and entry > 0:
+        risk["entry_price"] = entry
+    if stop_loss and stop_loss > 0:
+        risk["stop_loss"] = stop_loss
+    if take_profit and take_profit > 0:
+        risk["take_profit"] = take_profit
+    if entry and stop_loss and take_profit and abs(entry - stop_loss) > 0:
+        risk["risk_reward_ratio"] = abs(take_profit - entry) / abs(entry - stop_loss)
+    return risk
 
 
 class ShutdownFlag:
@@ -142,6 +183,9 @@ async def _persist_results(
     evolution_report = state.get("evolution_report")
 
     risk_flags, security_flags = collect_all_flags(agent_results)
+    external_risk = _external_signal_risk(sig)
+    reward_plan = state.get("reward_plan") or {}
+    reward_take_profit = final_take_profit(reward_plan) if isinstance(reward_plan, dict) else None
 
     output_inserts = [
         AgentOutputInsert(
@@ -199,6 +243,13 @@ async def _persist_results(
             "risk_score": state.get("risk_score", 100.0),
             "data_quality_score": state.get("data_quality_score", 100.0),
             "manipulation_score_penalty": state.get("manipulation_score_penalty", 0.0),
+            "reward_plan": reward_plan,
+            "tp_plan": reward_plan.get("levels", []) if isinstance(reward_plan, dict) else [],
+            "risk_reward_ratio": state.get("selected_reward_r"),
+            "max_reward_r": state.get("max_reward_r"),
+            "min_reward_r": state.get("min_reward_r"),
+            "take_profit": reward_take_profit,
+            **external_risk,
         },
         security_summary={
             "flags": security_flags,
@@ -217,9 +268,15 @@ async def _persist_results(
             "count": len(agent_results),
             "agents": [result.get("agent_name") for result in agent_results],
         },
+        suggested_entry_price=external_risk.get("entry_price"),
+        suggested_stop_loss=external_risk.get("stop_loss"),
+        suggested_take_profit=external_risk.get("take_profit") or reward_take_profit,
         metadata={
             "dry_run": settings.dry_run,
             "warming_up": state.get("warming_up", False),
+            "external_signal_source": external_risk.get("external_source"),
+            "telegram_source_id": (sig.metadata or {}).get("telegram_source_id"),
+            "telegram_message_id": (sig.metadata or {}).get("telegram_message_id"),
             "rejection_reason": (
                 "insufficient_history_warming_up"
                 if state.get("warming_up")
@@ -467,7 +524,10 @@ async def _execute_paper_trade(
 
         # ── 3. Compute position sizing (2% risk rule) ─────────────────────────
         snapshot_dict = state.get("market_snapshot") or {}
+        external_risk = _external_signal_risk(sig)
         entry_price   = float(snapshot_dict.get("close_price") or 0)
+        if external_risk.get("entry_price"):
+            entry_price = float(external_risk["entry_price"])
         if entry_price <= 0:
             reason = f"Invalid entry price {entry_price} from market snapshot"
             await _paper_exec_repo.mark_decision_failed(decision_id, reason, worker_id)
@@ -491,10 +551,8 @@ async def _execute_paper_trade(
             or 2.0
         )
         risk_value       = float(risk_value_raw)
-        risk_reward_ratio = max(
-            float(bot_dict_exec.get("risk_reward_ratio") or bot.risk_reward_ratio or 2.0),
-            risk_profile["min_rr"],
-        )
+        user_max_reward_r = float(user_settings_exec.get("max_reward_r") or 5.0)
+        user_min_reward_r = float(user_settings_exec.get("min_reward_r") or risk_profile["min_rr"])
 
         if trading_system == "portfolio_management" and direction == "short":
             reason = "Portfolio management profile does not open short/futures-style positions"
@@ -522,10 +580,16 @@ async def _execute_paper_trade(
         stop_dist_abs   = entry_price * stop_dist_pct / 100.0
         if direction == "long":
             stop_loss   = entry_price - stop_dist_abs
-            take_profit = entry_price + stop_dist_abs * risk_reward_ratio
         else:
             stop_loss   = entry_price + stop_dist_abs
-            take_profit = entry_price - stop_dist_abs * risk_reward_ratio
+
+        if external_risk.get("stop_loss"):
+            stop_loss = float(external_risk["stop_loss"])
+            stop_dist_abs = abs(entry_price - stop_loss)
+        if stop_dist_abs <= 0:
+            reason = "External signal stop-loss produces zero risk distance"
+            await _paper_exec_repo.mark_decision_failed(decision_id, reason, worker_id)
+            return
 
         # Position size: risk_amount / stop_distance_per_unit
         intended_risk_amount = risk_amount
@@ -548,6 +612,35 @@ async def _execute_paper_trade(
             risk_pct = (risk_amount / balance * 100.0) if balance > 0 else 0.0
 
         notional        = entry_price * position_qty
+        reward_plan = state.get("reward_plan") or {}
+        if not reward_plan:
+            requested_r = (
+                float(external_risk["risk_reward_ratio"])
+                if external_risk.get("risk_reward_ratio")
+                else None
+            )
+            reward_plan = build_reward_plan(
+                entry_price=entry_price,
+                stop_loss=stop_loss,
+                direction=direction,
+                requested_reward_r=requested_r,
+                max_reward_r=user_max_reward_r,
+                min_reward_r=user_min_reward_r,
+                close_profile="balanced",
+                source="agent_engine_inline_fallback",
+                rationale="Inline paper executor generated fallback reward plan.",
+                confidence=0.65,
+            )
+        risk_reward_ratio = float((reward_plan or {}).get("selected_reward_r") or user_min_reward_r)
+        take_profit = (
+            float(external_risk["take_profit"])
+            if external_risk.get("take_profit")
+            else float(final_take_profit(reward_plan) or 0.0)
+        )
+        if take_profit <= 0:
+            reason = "Reward planner did not produce a valid take-profit"
+            await _paper_exec_repo.mark_decision_failed(decision_id, reason, worker_id)
+            return
         expected_reward = risk_amount * risk_reward_ratio
 
         # ── 4. Insert trade row ───────────────────────────────────────────────
@@ -565,7 +658,7 @@ async def _execute_paper_trade(
             "entry_price":        entry_price,
             "quantity":           position_qty,
             "filled_quantity":    position_qty,
-            "avg_fill_price":     entry_price,
+            "avg_entry_price":    entry_price,
             "stop_loss":          stop_loss,
             "take_profit":        take_profit,
             "risk_amount":        risk_amount,
@@ -588,6 +681,8 @@ async def _execute_paper_trade(
                 "max_quantity":         max_qty,
                 "reserved_on_open":  False,
                 "paper_fill_status": "filled",
+                "reward_plan":       reward_plan,
+                "tp_plan":           reward_plan.get("levels", []),
             },
         }
 
@@ -655,12 +750,48 @@ async def _execute_paper_trade(
                 "risk_amount":   risk_amount,
                 "risk_percent":  risk_pct,
                 "expected_reward": expected_reward,
+                "reward_plan": reward_plan,
+                "tp_plan": reward_plan.get("levels", []),
                 "direction":     direction,
                 "balance_before": balance,
                 "balance_after":  balance,
                 "reserved_on_open": False,
             },
         })
+
+        try:
+            get_client().table("notifications").insert({
+                "user_id": str(sig.user_id),
+                "type": "trade_opened",
+                "title": "İşlem açıldı",
+                "message": (
+                    f"{direction.upper()} {sig.symbol} işlemi {entry_price:.8g} giriş fiyatıyla açıldı. "
+                    f"Miktar {position_qty:.8g}, notional ${notional:.2f}, "
+                    f"SL {stop_loss:.8g}, TP {take_profit:.8g}, "
+                    f"1R ${risk_amount:.2f}."
+                ),
+                "is_read": False,
+                "related_table": "trades",
+                "related_id": trade_id,
+                "priority": 2,
+                "metadata": {
+                    "trade_id": trade_id,
+                    "decision_id": decision_id,
+                    "symbol": sig.symbol,
+                    "direction": direction,
+                    "side": side,
+                    "mode": "paper",
+                    "entry_price": entry_price,
+                    "quantity": position_qty,
+                    "notional": notional,
+                    "stop_loss": stop_loss,
+                    "take_profit": take_profit,
+                    "risk_amount": risk_amount,
+                    "risk_percent": risk_pct,
+                },
+            }).execute()
+        except Exception as exc:
+            log.warning("notification.trade_opened_insert_failed", error=str(exc)[:200])
 
     except Exception as exc:
         error_text = str(exc).encode("ascii", "backslashreplace").decode("ascii")[:500]
@@ -789,6 +920,8 @@ async def _process_signal(
             final_decision  = state.get("final_decision", "")
             approval_status = state.get("approval_status", "")
             if (
+                settings.enable_inline_paper_execution
+                and
                 bot is not None
                 and bot.mode.value == "paper"
                 and final_decision in ("open_long", "open_short")

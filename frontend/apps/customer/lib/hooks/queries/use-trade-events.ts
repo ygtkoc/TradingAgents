@@ -6,6 +6,11 @@ import { useQuery } from "@tanstack/react-query";
 
 import { supabase } from "../../supabase/client";
 
+function normalizeTradeEvent(row: TradeEvent): TradeEvent {
+  const details = (row.details ?? row.metadata ?? {}) as Record<string, unknown>;
+  return { ...row, details, metadata: (row.metadata ?? details) as Record<string, unknown> };
+}
+
 export function useTradeEvents(tradeId: string | undefined) {
   return useQuery<TradeEvent[]>({
     queryKey: tradeId ? queryKeys.trades.events(tradeId) : ["trades", "events", "none"],
@@ -20,7 +25,7 @@ export function useTradeEvents(tradeId: string | undefined) {
         .eq("trade_id", tradeId)
         .order("created_at", { ascending: true });
       if (error) throw error;
-      return (data ?? []) as TradeEvent[];
+      return ((data ?? []) as TradeEvent[]).map(normalizeTradeEvent);
     },
   });
 }
@@ -39,7 +44,7 @@ export function useTradeDecisionEvents(tradeDecisionId: string | undefined) {
         .eq("trade_decision_id", tradeDecisionId)
         .order("created_at", { ascending: true });
       if (error) throw error;
-      return (data ?? []) as TradeEvent[];
+      return ((data ?? []) as TradeEvent[]).map(normalizeTradeEvent);
     },
   });
 }

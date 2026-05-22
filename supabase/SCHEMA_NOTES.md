@@ -1,4 +1,4 @@
-# TradingAgents — Supabase SQL Foundation Notes
+# lucrandos Supabase SQL Foundation Notes
 
 ## Files
 - `migrations/0001_initial_schema.sql` — Full schema, indexes, RLS, grants

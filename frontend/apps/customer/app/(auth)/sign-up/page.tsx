@@ -119,7 +119,7 @@ export default function SignUpPage() {
         <div className="mx-auto flex h-10 w-10 items-center justify-center rounded-md bg-primary/15 text-primary">
           <Activity className="h-5 w-5" />
         </div>
-        <h1 className="text-xl font-semibold tracking-tight">TradingAgents</h1>
+        <h1 className="text-xl font-semibold tracking-tight">lucrandos</h1>
       </header>
 
       <Card>

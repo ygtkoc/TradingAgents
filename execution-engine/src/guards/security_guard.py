@@ -130,22 +130,22 @@ class SecurityExecutionGuard:
             checks.append(self._check_user_live_permission(user_settings))
 
         # ── 3. Exchange account exists ────────────────────────────────────────
-        checks.append(self._check_exchange_account_exists(exchange_account))
+        if is_live:
+            checks.append(self._check_exchange_account_exists(exchange_account))
 
         # ── 4. Exchange account is_active ─────────────────────────────────────
-        checks.append(self._check_exchange_account_active(exchange_account))
+            checks.append(self._check_exchange_account_active(exchange_account))
 
         # ── 5. can_trade = True ───────────────────────────────────────────────
-        checks.append(self._check_can_trade(exchange_account))
+            checks.append(self._check_can_trade(exchange_account))
 
         # ── 6. can_withdraw = False (CRITICAL) ────────────────────────────────
-        checks.append(self._check_no_withdraw_permission(exchange_account))
+            checks.append(self._check_no_withdraw_permission(exchange_account))
 
         # ── 7. withdrawal_detected = False ────────────────────────────────────
-        checks.append(self._check_withdrawal_not_detected(exchange_account))
+            checks.append(self._check_withdrawal_not_detected(exchange_account))
 
         # ── 8. Encrypted key present ──────────────────────────────────────────
-        if is_live:
             checks.append(self._check_encrypted_key_present(exchange_account))
 
         # ── 9. No critical unresolved security events ─────────────────────────

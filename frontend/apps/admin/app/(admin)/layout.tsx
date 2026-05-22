@@ -47,7 +47,7 @@ export default async function AdminShellLayout({ children }: { children: ReactNo
       topBar={
         <div className="flex w-full items-center justify-between">
           <div className="flex items-center gap-3">
-            <span className="text-sm font-semibold">TradingAgents Admin</span>
+            <span className="text-sm font-semibold">lucrandos Admin</span>
             <Badge variant="warning">admin</Badge>
           </div>
           <span className="text-xs text-muted-foreground">{user.email}</span>

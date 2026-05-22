@@ -55,6 +55,13 @@ export const queryKeys = {
     unread: (userId?: string) => ["notifications", "unread-count", { userId }] as const,
   },
 
+  telegram: {
+    accounts: (userId?: string) => ["telegram", "accounts", { userId }] as const,
+    chats:    (userId?: string, accountId?: string) => ["telegram", "chats", { userId, accountId }] as const,
+    sources:  (userId?: string) => ["telegram", "sources", { userId }] as const,
+    messages: (userId?: string) => ["telegram", "messages", { userId }] as const,
+  },
+
   logs: {
     risk:     (filters: Record<string, unknown> = {}) => ["logs", "risk",     filters] as const,
     security: (filters: Record<string, unknown> = {}) => ["logs", "security", filters] as const,

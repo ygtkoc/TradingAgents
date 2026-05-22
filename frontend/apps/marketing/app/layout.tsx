@@ -5,8 +5,8 @@ import "@ta/ui/styles.css";
 import "./globals.css";
 
 export const metadata: Metadata = {
-  title: "TradingAgents",
-  description: "Multi-agent AI trading platform",
+  title: "lucrandos",
+  description: "lucrandos multi-agent AI trading platform",
 };
 
 export default function RootLayout({ children }: { children: ReactNode }) {

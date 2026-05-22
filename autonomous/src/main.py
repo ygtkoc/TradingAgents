@@ -31,6 +31,7 @@ from src.logging_config import get_logger
 from src.services.email import EmailDispatcher
 from src.services.market_data import MarketDataCache, MarketDataFeed
 from src.services.signal_generator import SignalGenerator
+from src.services.telegram_ingestor import TelegramSignalIngestor
 from src.supervisor import Supervisor
 
 log = get_logger(__name__)
@@ -56,6 +57,7 @@ async def _amain() -> int:
     seeder      = SignalGenerator(cache=cache)
     booter      = DemoBootstrap()
     emailer     = EmailDispatcher()
+    telegram    = TelegramSignalIngestor()
 
     supervisor = Supervisor()
 
@@ -63,7 +65,14 @@ async def _amain() -> int:
     health_runner = await start_health_server(started_at=started_at)
 
     # ── Pre-register all heartbeat slots so /health is informative pre-tick ─
-    for s in ("market_data", "signal_generator", "bootstrap", "email_dispatcher", "heartbeat"):
+    for s in (
+        "market_data",
+        "signal_generator",
+        "bootstrap",
+        "email_dispatcher",
+        "telegram_ingestor",
+        "heartbeat",
+    ):
         tracker.register(s)
 
     log.info(
@@ -77,6 +86,7 @@ async def _amain() -> int:
     supervisor.spawn("signal_generator",  seeder.run)
     supervisor.spawn("bootstrap",         booter.run)
     supervisor.spawn("email_dispatcher",  emailer.run)
+    supervisor.spawn("telegram_ingestor", telegram.run)
     supervisor.spawn(
         "heartbeat",
         lambda: heartbeat_log_loop(interval_seconds=30.0),

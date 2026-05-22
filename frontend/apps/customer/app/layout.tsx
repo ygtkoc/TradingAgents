@@ -7,8 +7,8 @@ import "./globals.css";
 import { Providers } from "./providers";
 
 export const metadata: Metadata = {
-  title: "TradingAgents — Dashboard",
-  description: "Customer dashboard",
+  title: "lucrandos - Dashboard",
+  description: "lucrandos customer dashboard",
 };
 
 export default function RootLayout({ children }: { children: ReactNode }) {

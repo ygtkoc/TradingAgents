@@ -257,13 +257,11 @@ export default function NewBotPage() {
         <Card>
           <CardHeader>
             <CardTitle className="text-base">Sizing &amp; protective stops</CardTitle>
-            <CardDescription>Protective stops and signal timeframe. Wallet risk is configured in Settings.</CardDescription>
+            <CardDescription>Protective stops and signal timeframe. Wallet risk and max R are configured in Settings.</CardDescription>
           </CardHeader>
           <CardContent className="grid gap-4 sm:grid-cols-2">
             <NumberField label="Stop loss (%)"   value={form.stop_loss_pct}  step={0.1} min={0.1} max={20}
               onChange={(n) => update("stop_loss_pct", n)} />
-            <NumberField label="Take profit (%)" value={form.take_profit_pct} step={0.1} min={0.1} max={50}
-              onChange={(n) => update("take_profit_pct", n)} />
             <div className="flex items-center justify-between rounded-md border bg-card/40 p-3">
               <div>
                 <Label className="text-sm font-medium">Trailing stop</Label>

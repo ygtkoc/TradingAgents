@@ -27,7 +27,7 @@ export default function AuthLayout({ children }: { children: ReactNode }) {
             <Activity className="h-5 w-5 text-primary" />
           </div>
           <div>
-            <div className="text-[15px] font-bold tracking-tight text-foreground">TradingAgents</div>
+            <div className="text-[15px] font-bold tracking-tight text-foreground">lucrandos</div>
             <div className="text-[10px] text-muted-foreground/60">Multi-agent AI trading</div>
           </div>
         </div>

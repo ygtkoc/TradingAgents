@@ -7,8 +7,8 @@ import "./globals.css";
 import { Providers } from "./providers";
 
 export const metadata: Metadata = {
-  title: "TradingAgents — Admin",
-  description: "Platform operations dashboard",
+  title: "lucrandos - Admin",
+  description: "lucrandos platform operations dashboard",
   // Don't index admin
   robots: { index: false, follow: false },
 };

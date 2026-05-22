@@ -149,6 +149,10 @@ def _state_side_effects(state: PipelineState) -> dict[str, Any]:
         "atr",
         "atr_pct",
         "suggested_stop_pct",
+        "reward_plan",
+        "selected_reward_r",
+        "max_reward_r",
+        "min_reward_r",
         "risk_score",
         "effective_direction",
         "evolution_report",
@@ -319,7 +323,11 @@ def _build_graph(agents_by_name: dict[str, BaseAgent]) -> StateGraph:
 
     risk_agents = sorted(
         _by_category("risk"),
-        key=lambda agent: (0 if "auditor" in agent.name.lower() else 1),
+        key=lambda agent: (
+            0 if "auditor" in agent.name.lower()
+            else 1 if "reward" in agent.name.lower()
+            else 2
+        ),
     )
     graph.add_node(
         _RUN_RISK,

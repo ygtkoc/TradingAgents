@@ -64,6 +64,20 @@ def _risk_limit_pct(bot: Bot, user_settings: Optional[UserSettings]) -> float:
     return float(bot.risk_per_trade_pct or 0.0)
 
 
+def _decision_leverage(decision: TradeDecision, bot: Bot, is_live: bool = False) -> float:
+    if is_live or not _is_futures_profile(bot):
+        return 1.0
+
+    for source in (decision.risk_summary or {}, decision.metadata or {}, bot.metadata or {}):
+        try:
+            value = float(source.get("leverage") or source.get("max_leverage") or 0)
+        except (TypeError, ValueError):
+            value = 0.0
+        if value > 0:
+            return max(1.0, min(value, settings.paper_max_leverage_cap))
+    return 1.0
+
+
 @dataclass
 class RiskCheckResult:
     """Result of a single risk check."""
@@ -152,10 +166,14 @@ class RiskExecutionGuard:
         checks.append(self._check_daily_loss(daily_loss_usd, bot, user_settings, portfolio_value_usd))
 
         # ── 5. Max portfolio exposure ─────────────────────────────────────────
-        checks.append(self._check_portfolio_exposure(quantity, entry_price, portfolio_value_usd, bot))
+        checks.append(self._check_portfolio_exposure(
+            quantity, entry_price, portfolio_value_usd, bot, decision, is_live
+        ))
 
         # ── 6. Max position size pct ──────────────────────────────────────────
-        checks.append(self._check_position_size_pct(quantity, entry_price, portfolio_value_usd, bot))
+        checks.append(self._check_position_size_pct(
+            quantity, entry_price, portfolio_value_usd, bot, decision, is_live
+        ))
 
         # ── 7. Risk-per-trade pct ─────────────────────────────────────────────
         checks.append(self._check_risk_per_trade(
@@ -325,6 +343,8 @@ class RiskExecutionGuard:
         entry_price: float,
         portfolio_value_usd: float,
         bot: Bot,
+        decision: TradeDecision,
+        is_live: bool,
     ) -> RiskCheckResult:
         if portfolio_value_usd <= 0:
             return RiskCheckResult(
@@ -339,7 +359,8 @@ class RiskExecutionGuard:
         # Exposure cap: sum of all positions should not exceed 100%.
         # For a single new position we cap at max_position_size_pct * max_open_positions.
         # This is an approximation — a proper implementation would sum existing exposure.
-        max_exposure_pct = 100.0
+        leverage = _decision_leverage(decision, bot, is_live)
+        max_exposure_pct = 100.0 * leverage
 
         if exposure_pct > max_exposure_pct:
             return RiskCheckResult(
@@ -358,7 +379,8 @@ class RiskExecutionGuard:
         return RiskCheckResult(
             name="portfolio_exposure",
             passed=True,
-            message=f"Exposure {exposure_pct:.2f}% within limit {max_exposure_pct:.2f}%",
+            message=f"Exposure {exposure_pct:.2f}% within levered limit {max_exposure_pct:.2f}%",
+            metadata={"leverage": leverage},
         )
 
     def _check_position_size_pct(
@@ -367,6 +389,8 @@ class RiskExecutionGuard:
         entry_price: float,
         portfolio_value_usd: float,
         bot: Bot,
+        decision: TradeDecision,
+        is_live: bool,
     ) -> RiskCheckResult:
         if portfolio_value_usd <= 0:
             return RiskCheckResult(
@@ -379,7 +403,8 @@ class RiskExecutionGuard:
         position_value = quantity * entry_price
         size_pct = (position_value / portfolio_value_usd) * 100
 
-        limit_pct = 100.0
+        leverage = _decision_leverage(decision, bot, is_live)
+        limit_pct = 100.0 * leverage
 
         if size_pct > limit_pct:
             return RiskCheckResult(
@@ -397,7 +422,8 @@ class RiskExecutionGuard:
         return RiskCheckResult(
             name="position_size_pct",
             passed=True,
-            message=f"Position size {size_pct:.2f}% within limit {limit_pct:.2f}%",
+            message=f"Position size {size_pct:.2f}% within levered limit {limit_pct:.2f}%",
+            metadata={"leverage": leverage},
         )
 
     def _check_risk_per_trade(

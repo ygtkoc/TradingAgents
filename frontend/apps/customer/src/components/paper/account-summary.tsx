@@ -34,7 +34,11 @@ export function AccountSummary({ account }: Props) {
 
   const { icon: StatusIcon, color, bg, glow } = STATUS_META[status];
 
-  const balance   = safeNum(account.balance);
+  const totalBalance = safeNum(account.balance);
+  const reservedBalance = safeNum(account.reserved_balance);
+  const availableBalance = safeNum(
+    account.available_balance ?? totalBalance - reservedBalance,
+  );
   const rawRealized = safeNum(account.realized_pnl);
   const rawUnrealized = safeNum(account.unrealized_pnl);
   const start     = safeNum(account.starting_balance) || 1;
@@ -58,7 +62,7 @@ export function AccountSummary({ account }: Props) {
   const realized = rawRealized === 0 && tradeRealized !== 0 ? tradeRealized : rawRealized;
   const unrealized = hasOpenTrades ? tradeUnrealized : rawUnrealized;
 
-  const equity    = balance + unrealized;
+  const equity    = totalBalance + unrealized;
   const change    = ((equity - start) / start) * 100;
   const isPositive = change >= 0;
 
@@ -142,9 +146,11 @@ export function AccountSummary({ account }: Props) {
       <div className="mx-6 border-t border-border/30" />
 
       {/* Stats grid */}
-      <div className="relative grid grid-cols-2 gap-px bg-border/20 sm:grid-cols-4 lg:grid-cols-7">
+      <div className="relative grid grid-cols-2 gap-px bg-border/20 sm:grid-cols-3 lg:grid-cols-9">
         {[
-          { label: "Balance",    value: formatCurrency(balance),  icon: null },
+          { label: "Available",  value: formatCurrency(availableBalance), icon: null },
+          { label: "Total",      value: formatCurrency(totalBalance),     icon: null },
+          { label: "In trades",  value: formatCurrency(reservedBalance),  icon: null },
           { label: "Realized",   value: formatCurrency(realized), icon: realized >= 0 ? ArrowUpRight : ArrowDownRight,
             tone: realized > 0 ? "pos" : realized < 0 ? "neg" : null },
           { label: "Unrealized", value: formatCurrency(unrealized), icon: null,

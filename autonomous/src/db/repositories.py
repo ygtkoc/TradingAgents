@@ -252,6 +252,239 @@ class SignalRepository:
             raise RuntimeError("signals insert returned no rows")
         return result.data[0]["id"]
 
+    async def create_telegram(
+        self,
+        *,
+        user_id: str,
+        bot_id: str,
+        exchange: str,
+        symbol: str,
+        direction: str,
+        confidence: float,
+        metadata: dict[str, Any],
+    ) -> str:
+        row = {
+            "user_id":     user_id,
+            "bot_id":      bot_id,
+            "exchange":    exchange,
+            "symbol":      symbol,
+            "direction":   direction,
+            "signal_type": "telegram",
+            "confidence":  confidence,
+            "score":       None,
+            "status":      "pending",
+            "metadata":    metadata,
+        }
+
+        def _insert():
+            return self._client.table("signals").insert(row).execute()
+
+        result = await _run(_insert)
+        if not result.data:
+            raise RuntimeError("telegram signals insert returned no rows")
+        return result.data[0]["id"]
+
+
+class TelegramSignalRepository:
+    def __init__(self) -> None:
+        self._client = get_client()
+
+    async def list_enabled_sources(self) -> list[dict[str, Any]]:
+        def _q():
+            return (
+                self._client.table("telegram_signal_sources")
+                .select("*")
+                .eq("enabled", True)
+                .execute()
+            )
+        result = await _run(_q)
+        return result.data or []
+
+    async def get_account(self, user_id: str, account_id: str) -> Optional[dict[str, Any]]:
+        def _q():
+            return (
+                self._client.table("telegram_accounts")
+                .select("*")
+                .eq("user_id", user_id)
+                .eq("id", account_id)
+                .limit(1)
+                .execute()
+            )
+        result = await _run(_q)
+        rows = result.data or []
+        return rows[0] if rows else None
+
+    async def list_connected_accounts(self) -> list[dict[str, Any]]:
+        def _q():
+            return (
+                self._client.table("telegram_accounts")
+                .select("*")
+                .eq("connection_status", "connected")
+                .execute()
+            )
+        result = await _run(_q)
+        return result.data or []
+
+    async def create_pending_account(
+        self,
+        *,
+        user_id: str,
+        account_label: str,
+        phone_hint: str,
+        pending_session: str,
+        phone_code_hash: str,
+    ) -> str:
+        row = {
+            "user_id": user_id,
+            "account_label": account_label,
+            "phone_hint": phone_hint,
+            "connection_status": "pending",
+            "session_ciphertext": pending_session,
+            "metadata": {"phone_code_hash": phone_code_hash},
+        }
+
+        def _insert():
+            return self._client.table("telegram_accounts").insert(row).execute()
+
+        result = await _run(_insert)
+        if not result.data:
+            raise RuntimeError("telegram_accounts insert returned no rows")
+        return result.data[0]["id"]
+
+    async def mark_account_connected(self, account_id: str, session_string: str) -> None:
+        def _update():
+            return (
+                self._client.table("telegram_accounts")
+                .update({
+                    "connection_status": "connected",
+                    "session_ciphertext": session_string,
+                    "last_connected_at": utcnow_iso(),
+                    "last_error": None,
+                    "metadata": {},
+                })
+                .eq("id", account_id)
+                .execute()
+            )
+        await _run(_update)
+
+    async def mark_account_error(self, account_id: str, error: str) -> None:
+        def _update():
+            return (
+                self._client.table("telegram_accounts")
+                .update({
+                    "connection_status": "error",
+                    "last_error": error[:500],
+                })
+                .eq("id", account_id)
+                .execute()
+            )
+        await _run(_update)
+
+    async def replace_chat_options(
+        self,
+        *,
+        user_id: str,
+        telegram_account_id: str,
+        rows: list[dict[str, Any]],
+    ) -> None:
+        def _delete():
+            return (
+                self._client.table("telegram_chat_options")
+                .delete()
+                .eq("user_id", user_id)
+                .eq("telegram_account_id", telegram_account_id)
+                .execute()
+            )
+        await _run(_delete)
+
+        if not rows:
+            return
+
+        def _insert():
+            return self._client.table("telegram_chat_options").insert(rows).execute()
+
+        await _run(_insert)
+
+    async def get_source_for_chat(self, chat_id: str) -> Optional[dict[str, Any]]:
+        return await self.get_source_for_chat_topic(chat_id, None)
+
+    async def get_source_for_chat_topic(
+        self,
+        chat_id: str,
+        topic_id: Optional[str],
+    ) -> Optional[dict[str, Any]]:
+        def _q():
+            q = (
+                self._client.table("telegram_signal_sources")
+                .select("*")
+                .eq("chat_id", chat_id)
+                .eq("enabled", True)
+            )
+            if topic_id:
+                q = q.or_(f"topic_id.eq.{topic_id},topic_id.is.null")
+            else:
+                q = q.is_("topic_id", "null")
+            return q.limit(1).execute()
+        result = await _run(_q)
+        rows = result.data or []
+        return rows[0] if rows else None
+
+    async def message_exists(self, source_id: str, telegram_message_id: str) -> bool:
+        def _q():
+            return (
+                self._client.table("telegram_signal_messages")
+                .select("id", count="exact", head=True)
+                .eq("source_id", source_id)
+                .eq("telegram_message_id", telegram_message_id)
+                .execute()
+            )
+        result = await _run(_q)
+        return bool(result.count)
+
+    async def record_message(
+        self,
+        *,
+        source_id: str,
+        user_id: str,
+        telegram_message_id: str,
+        raw_text: str,
+        received_at: str,
+        normalized_signal: dict[str, Any],
+        parse_status: str,
+        parse_error: Optional[str] = None,
+    ) -> str:
+        row = {
+            "source_id":           source_id,
+            "user_id":             user_id,
+            "telegram_message_id": telegram_message_id,
+            "raw_text":            raw_text,
+            "received_at":         received_at,
+            "normalized_signal":   normalized_signal,
+            "parse_status":        parse_status,
+            "parse_error":         parse_error,
+        }
+
+        def _insert():
+            return self._client.table("telegram_signal_messages").insert(row).execute()
+
+        result = await _run(_insert)
+        if not result.data:
+            raise RuntimeError("telegram_signal_messages insert returned no rows")
+        return result.data[0]["id"]
+
+    async def mark_signal_created(self, message_id: str, signal_id: str) -> None:
+        def _update():
+            return (
+                self._client.table("telegram_signal_messages")
+                .update({
+                    "parse_status": "signal_created",
+                    "signal_id": signal_id,
+                })
+                .eq("id", message_id)
+                .execute()
+            )
+        await _run(_update)
+
 
 # ── Bots + users ─────────────────────────────────────────────────────────────
 

@@ -137,7 +137,7 @@ class Profile(BaseDBModel):
 
 
 class UserSettings(BaseDBModel):
-    id: str
+    id: Optional[str] = None
     user_id: str
     default_risk_per_trade_pct: float = 1.0
     max_daily_loss_pct: float = 5.0
@@ -146,6 +146,8 @@ class UserSettings(BaseDBModel):
     paper_trading_enabled: bool = True
     real_trading_enabled: bool = False
     real_trading_requires_approval: bool = True
+    max_reward_r: float = 5.0
+    min_reward_r: float = 1.5
 
 
 class Bot(BaseDBModel):
@@ -385,6 +387,10 @@ class TradeDecisionInsert(BaseModel):
     agent_outputs_snapshot: dict[str, Any]
     approval_status: str
     manual_approval_required: bool
+    suggested_entry_price: Optional[float] = None
+    suggested_quantity: Optional[float] = None
+    suggested_stop_loss: Optional[float] = None
+    suggested_take_profit: Optional[float] = None
     metadata: dict[str, Any] = Field(default_factory=dict)
     execution_status: str = "pending_execution"
     execution_worker_id: Optional[str] = None

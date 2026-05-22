@@ -64,6 +64,8 @@ export interface UserSettingsUpdateRequest {
   daily_loss_limit_usd?:   number | null;
   max_concurrent_trades?:  number | null;
   default_risk_per_trade_pct?: number | null;
+  max_reward_r?:           number | null;
+  min_reward_r?:           number | null;
 }
 
 // ─── Paper account ───────────────────────────────────────────────────────────

@@ -16,6 +16,7 @@ from src.db.models import AgentDecision, AgentOutputResult
 from src.logging_config import get_logger
 from src.services import indicators as ind
 from src.services.market_data import extract_closes, extract_highs, extract_lows
+from src.services.reward_plan import build_reward_plan, final_take_profit
 
 if TYPE_CHECKING:
     from src.orchestration.state import PipelineState
@@ -58,6 +59,70 @@ def _candles_required_for_bot(bot_dict: dict) -> int:
         or bot_dict.get("metadata", {}).get("strategy", "balanced")
     )
     return _CANDLES_REQUIRED_BY_STRATEGY.get(str(strategy), 100)
+
+
+def _float_from(*values: object) -> float:
+    for value in values:
+        try:
+            parsed = float(value)  # type: ignore[arg-type]
+        except (TypeError, ValueError):
+            continue
+        if parsed > 0:
+            return parsed
+    return 0.0
+
+
+def _select_reward_r(
+    *,
+    max_reward_r: float,
+    min_reward_r: float,
+    risk_score: float,
+    atr_pct: float,
+    strategy: str,
+) -> tuple[float, str, str]:
+    """Heuristic reward selector used by RewardPlanAgent."""
+    max_r = max(1.0, min(10.0, float(max_reward_r or 5.0)))
+    min_r = max(0.5, min(max_r, float(min_reward_r or 1.5)))
+    reward_range = max(0.0, max_r - min_r)
+
+    # max_reward_r is a ceiling, not a target. Most normal trades should sit
+    # inside the range; only unusually clean, low-volatility setups can approach
+    # the user's configured maximum.
+    risk_quality = max(0.0, min(1.0, (float(risk_score) - 35.0) / 60.0))
+    base_r = min_r + reward_range * (0.20 + risk_quality * 0.55)
+
+    if strategy in {"trend_following", "momentum"}:
+        base_r += reward_range * 0.10
+        profile = "runner"
+    elif strategy == "scalping":
+        base_r -= reward_range * 0.15
+        profile = "conservative"
+    else:
+        profile = "balanced"
+
+    if atr_pct >= 4.0:
+        base_r -= reward_range * 0.20
+    elif atr_pct >= 2.5:
+        base_r -= reward_range * 0.10
+    elif atr_pct <= 1.0 and risk_score >= 85:
+        base_r += reward_range * 0.10
+
+    exceptional_setup = (
+        risk_score >= 92.0
+        and atr_pct <= 1.2
+        and strategy in {"trend_following", "momentum"}
+    )
+    if not exceptional_setup and reward_range >= 0.25:
+        base_r = min(base_r, max_r - 0.25)
+
+    selected = max(min_r, min(max_r, base_r))
+    selected = round(selected * 4.0) / 4.0
+    selected = max(min_r, min(max_r, selected))
+    rationale = (
+        f"strategy={strategy}, risk_score={risk_score:.1f}, atr_pct={atr_pct:.2f}; "
+        f"selected {selected:.2f}R inside user ceiling {max_r:.2f}R."
+    )
+    return selected, profile, rationale
 
 
 class RiskAuditorAgent(BaseAgent):
@@ -323,6 +388,130 @@ class RiskAuditorAgent(BaseAgent):
                 "warming_up": False,
             },
             risk_flags=flags,
+        )
+
+
+class RewardPlanAgent(BaseAgent):
+    """
+    Builds an automatic per-trade reward/R and scaled TP plan.
+
+    This is the risk-management "AI controller" for exits: it caps reward by
+    user max_reward_r, adapts selected R to volatility/risk score/strategy, and
+    writes TP1/TP2/TP3 levels into pipeline state for execution.
+    """
+
+    async def _execute(self, state: "PipelineState") -> AgentOutputResult:
+        signal = state["signal"]
+        intended = _get_direction(state)
+        snapshot_dict = state.get("market_snapshot")
+        bot_dict = state.get("bot") or {}
+        user_settings = state.get("user_settings") or {}
+
+        if not snapshot_dict:
+            return self._safe_veto(
+                reason="Reward planner cannot run without a market snapshot.",
+                severity_flags=["reward_plan_impossible"],
+            )
+
+        current_price = float(snapshot_dict.get("close_price") or 0.0)
+        if current_price <= 0:
+            return self._safe_veto(
+                reason="Reward planner cannot run with invalid entry price.",
+                severity_flags=["reward_plan_impossible"],
+            )
+
+        metadata = bot_dict.get("metadata") or {}
+        atr_pct = float(state.get("atr_pct") or 0.0)
+        stop_pct = float(
+            metadata.get("stop_loss_pct")
+            or state.get("suggested_stop_pct")
+            or max(2.0, atr_pct * 2.0)
+        )
+        stop_distance = current_price * stop_pct / 100.0
+        if stop_distance <= 0:
+            return self._safe_veto(
+                reason="Reward planner computed a zero stop distance.",
+                severity_flags=["reward_plan_impossible"],
+            )
+
+        direction = "short" if intended == "short" else "long"
+        stop_loss = current_price + stop_distance if direction == "short" else current_price - stop_distance
+
+        max_reward_r = _float_from(
+            user_settings.get("max_reward_r"),
+            metadata.get("max_reward_r"),
+            5.0,
+        )
+        min_reward_r = _float_from(
+            user_settings.get("min_reward_r"),
+            metadata.get("min_reward_r"),
+            1.5,
+        )
+
+        risk_score = float(state.get("risk_score") or 50.0)
+        strategy = str(bot_dict.get("strategy_type") or metadata.get("strategy") or "balanced")
+        requested_r, profile, rationale = _select_reward_r(
+            max_reward_r=max_reward_r,
+            min_reward_r=min_reward_r,
+            risk_score=risk_score,
+            atr_pct=atr_pct,
+            strategy=strategy,
+        )
+
+        if requested_r < min_reward_r:
+            return self._safe_veto(
+                reason=(
+                    f"Reward potential {requested_r:.2f}R is below minimum "
+                    f"{min_reward_r:.2f}R for {signal.symbol}."
+                ),
+                severity_flags=["insufficient_reward_potential"],
+            )
+
+        plan = build_reward_plan(
+            entry_price=current_price,
+            stop_loss=stop_loss,
+            direction=direction,
+            requested_reward_r=requested_r,
+            max_reward_r=max_reward_r,
+            min_reward_r=min_reward_r,
+            close_profile=profile,
+            rationale=rationale,
+            confidence=0.82,
+        )
+        if not plan:
+            return self._safe_veto(
+                reason="Reward planner failed to build a valid TP plan.",
+                severity_flags=["reward_plan_impossible"],
+            )
+
+        take_profit = final_take_profit(plan)
+        state["reward_plan"] = plan
+        state["selected_reward_r"] = plan["selected_reward_r"]
+        state["max_reward_r"] = max_reward_r
+        state["min_reward_r"] = min_reward_r
+
+        return self._make_result(
+            decision=AgentDecision.WAIT,
+            score=15.0,
+            confidence=0.82,
+            reasoning=(
+                f"Reward plan selected {plan['selected_reward_r']:.2f}R "
+                f"(max {max_reward_r:.2f}R). {rationale}"
+            ),
+            output={
+                "entry_price": current_price,
+                "stop_loss": stop_loss,
+                "take_profit": take_profit,
+                "risk_reward_ratio": plan["selected_reward_r"],
+                "reward_plan": plan,
+                "tp_plan": plan["levels"],
+                "max_reward_r": max_reward_r,
+                "min_reward_r": min_reward_r,
+            },
+            recommendations=[
+                "Use TP1/TP2/TP3 scaled exits instead of a single full take-profit.",
+                "Move stop to breakeven after TP1 and protect TP1 area after TP2.",
+            ],
         )
 
 

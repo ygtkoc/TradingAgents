@@ -44,11 +44,13 @@ from src.execution.idempotency import IdempotencyChecker
 from src.execution.live_executor import LiveExecutionError, LiveExecutor
 from src.execution.order_builder import OrderBuildError, OrderBuilder
 from src.execution.paper_executor import PaperExecutor
+from src.execution.reward_plan import final_take_profit, normalize_reward_plan
 from src.execution.shadow_executor import ShadowExecutor
 from src.guards.risk_guard import RiskExecutionGuard
 from src.guards.security_guard import SecurityExecutionGuard
 from src.logging_config import get_logger
 from src.services.market_data import MarketDataService
+from src.services.futures_metadata import FuturesMetadataService
 from src.services.notifications import NotificationService
 from src.services.paper_account import PaperAccountService
 from src.services.recovery import RecoveryService
@@ -74,6 +76,7 @@ class ExecutionEngine:
         self._risk_guard = RiskExecutionGuard()
         self._idempotency = IdempotencyChecker()
         self._market_data = MarketDataService()
+        self._futures_metadata = FuturesMetadataService()
         self._notifications = NotificationService()
         self._recovery = RecoveryService()
         self._paper_account = PaperAccountService()
@@ -144,13 +147,13 @@ class ExecutionEngine:
                     source="execution_engine",
                     message=(
                         "Live trade decision reached execution engine but "
-                        "ENABLE_LIVE_EXECUTION=false. Decision failed."
+                        "ENABLE_LIVE_EXECUTION=false. Decision skipped."
                     ),
                     metadata={"decision_id": decision.id},
                 )
             )
             await self._notifications.live_gate_blocked(decision=decision)
-            await self._fail(decision, reason)
+            await self._decision_repo.mark_skipped(decision.id, reason)
             return
 
         try:
@@ -168,48 +171,53 @@ class ExecutionEngine:
             decision=decision,
             execution_mode=execution_mode,
         )
+        max_leverage = await self._resolve_max_leverage(
+            decision=decision,
+            bot=bot,
+            execution_mode=execution_mode,
+        )
         self._enrich_missing_risk_summary(
             decision=decision,
             bot=bot,
             market_snapshot=market_snapshot,
             portfolio_value_usd=portfolio_value_usd,
             user_settings=user_settings,
+            max_leverage=max_leverage,
         )
 
-        if is_live:
-            critical_event_count = await self._decision_repo.count_critical_security_events(
-                decision.user_id
-            )
-            sec_result = self._security_guard.check(
-                decision=decision,
-                bot=bot,
-                user_settings=user_settings,
-                exchange_account=exchange_account,
-                critical_security_event_count=critical_event_count,
-                platform_settings=platform_settings,
-            )
-            if sec_result.blocked:
-                await self._security_log.create(
-                    SecurityLogInsert(
-                        user_id=decision.user_id,
-                        event_type="security_guard_blocked_execution",
-                        severity=SeverityLevel.CRITICAL.value,
-                        source="execution_engine",
-                        message=f"Security guard blocked: {sec_result.reason[:400]}",
-                        metadata={
-                            "decision_id": decision.id,
-                            "failed_checks": [
-                                {"name": c.name, "message": c.message}
-                                for c in sec_result.failed_checks
-                            ],
-                        },
-                    )
+        critical_event_count = await self._decision_repo.count_critical_security_events(
+            decision.user_id
+        )
+        sec_result = self._security_guard.check(
+            decision=decision,
+            bot=bot,
+            user_settings=user_settings,
+            exchange_account=exchange_account,
+            critical_security_event_count=critical_event_count,
+            platform_settings=platform_settings,
+        )
+        if sec_result.blocked:
+            await self._security_log.create(
+                SecurityLogInsert(
+                    user_id=decision.user_id,
+                    event_type="security_guard_blocked_execution",
+                    severity=SeverityLevel.CRITICAL.value,
+                    source="execution_engine",
+                    message=f"Security guard blocked: {sec_result.reason[:400]}",
+                    metadata={
+                        "decision_id": decision.id,
+                        "failed_checks": [
+                            {"name": c.name, "message": c.message}
+                            for c in sec_result.failed_checks
+                        ],
+                    },
                 )
-                await self._notifications.trade_skipped(
-                    decision=decision, reason=sec_result.reason
-                )
-                await self._fail(decision, sec_result.reason[:500])
-                return
+            )
+            await self._notifications.trade_skipped(
+                decision=decision, reason=sec_result.reason
+            )
+            await self._decision_repo.mark_skipped(decision.id, sec_result.reason[:500])
+            return
 
         existing_trade = await self._idempotency.find_existing_trade(decision.id)
         if existing_trade is not None:
@@ -262,7 +270,7 @@ class ExecutionEngine:
             await self._notifications.trade_skipped(
                 decision=decision, reason=risk_result.reason
             )
-            await self._fail(decision, risk_result.reason[:500])
+            await self._decision_repo.mark_skipped(decision.id, risk_result.reason[:500])
             return
 
         order_builder = OrderBuilder(portfolio_value_usd=portfolio_value_usd)
@@ -424,6 +432,50 @@ class ExecutionEngine:
             return (portfolio_value * size_pct / 100.0) / entry_price
         return 0.0
 
+    async def _resolve_max_leverage(
+        self,
+        *,
+        decision: TradeDecision,
+        bot: Optional[Bot],
+        execution_mode: str,
+    ) -> float:
+        if execution_mode not in ("paper", "shadow"):
+            return 1.0
+
+        metadata = (bot.metadata if bot else {}) or {}
+        configured = self._get_configured_leverage(metadata, decision.symbol)
+        if configured:
+            return configured
+
+        if str(metadata.get("trading_system") or "") == "futures_trading":
+            return await self._futures_metadata.max_leverage(
+                decision.exchange,
+                decision.symbol,
+            )
+        return 1.0
+
+    @staticmethod
+    def _get_configured_leverage(metadata: dict, symbol: str) -> Optional[float]:
+        def as_float(value) -> Optional[float]:
+            try:
+                parsed = float(value)
+                return parsed if parsed > 0 else None
+            except (TypeError, ValueError):
+                return None
+
+        by_symbol = metadata.get("max_leverage_by_symbol")
+        if isinstance(by_symbol, dict):
+            normalized = symbol.replace("/", "").upper()
+            for key in (symbol, symbol.upper(), normalized):
+                value = as_float(by_symbol.get(key))
+                if value:
+                    return value
+        return as_float(
+            metadata.get("max_leverage")
+            or metadata.get("leverage")
+            or metadata.get("paper_max_leverage")
+        )
+
     def _enrich_missing_risk_summary(
         self,
         *,
@@ -432,6 +484,7 @@ class ExecutionEngine:
         market_snapshot: Optional[MarketSnapshot],
         portfolio_value_usd: float,
         user_settings: Optional[UserSettings] = None,
+        max_leverage: float = 1.0,
     ) -> None:
         if bot is None:
             return
@@ -452,8 +505,14 @@ class ExecutionEngine:
         is_short = decision.final_decision == "open_short" or decision.direction == "short"
         metadata = bot.metadata or {}
         stop_loss_pct = num(metadata.get("stop_loss_pct"), 2.0)
-        take_profit_pct = num(metadata.get("take_profit_pct"))
-        risk_reward_ratio = num(risk.get("risk_reward_ratio"), num(bot.risk_reward_ratio, 2.0)) or 2.0
+        max_reward_r = num(
+            getattr(user_settings, "max_reward_r", None),
+            num(metadata.get("max_reward_r"), 5.0),
+        ) or 5.0
+        min_reward_r = num(
+            getattr(user_settings, "min_reward_r", None),
+            num(metadata.get("min_reward_r"), 1.5),
+        ) or 1.5
 
         if not risk.get("entry_price"):
             risk["entry_price"] = entry_price
@@ -461,16 +520,6 @@ class ExecutionEngine:
         if not risk.get("stop_loss") and stop_loss_pct and stop_loss_pct > 0:
             distance = entry_price * (stop_loss_pct / 100.0)
             risk["stop_loss"] = entry_price + distance if is_short else entry_price - distance
-
-        if not risk.get("take_profit"):
-            if take_profit_pct and take_profit_pct > 0:
-                tp_distance = entry_price * (take_profit_pct / 100.0)
-            elif risk.get("stop_loss"):
-                tp_distance = abs(entry_price - float(risk["stop_loss"])) * risk_reward_ratio
-            else:
-                tp_distance = 0
-            if tp_distance > 0:
-                risk["take_profit"] = entry_price - tp_distance if is_short else entry_price + tp_distance
 
         risk_pct = num(
             getattr(user_settings, "default_risk_per_trade_pct", None),
@@ -486,21 +535,54 @@ class ExecutionEngine:
         stop_distance = abs(entry_price - stop_loss) if stop_loss else 0.0
         risk_qty = max_risk_amount / stop_distance if stop_distance > 0 else None
         is_futures_profile = str(metadata.get("trading_system") or "") == "futures_trading"
-        max_position_pct = 100.0
+        leverage = max(1.0, float(max_leverage or 1.0)) if is_futures_profile else 1.0
+        max_position_pct = 100.0 * leverage
         max_position_qty = (portfolio_value_usd * (max_position_pct / 100.0)) / entry_price
 
         qty_candidates = [q for q in (risk_qty, max_position_qty) if q and q > 0]
         if not risk.get("quantity") and qty_candidates:
             quantity = min(qty_candidates)
+            notional = quantity * entry_price
+            margin_required = notional / leverage
             risk["quantity"] = round(quantity, 8)
             risk["risk_amount"] = round(stop_distance * quantity, 8) if stop_distance > 0 else max_risk_amount
             risk["risk_percent"] = round((float(risk["risk_amount"]) / portfolio_value_usd) * 100.0, 6)
-            risk["position_size_pct"] = round(((quantity * entry_price) / portfolio_value_usd) * 100.0, 6)
+            risk["position_size_pct"] = round((notional / portfolio_value_usd) * 100.0, 6)
+            risk["notional"] = round(notional, 8)
+            risk["leverage"] = round(leverage, 4)
+            risk["margin_required"] = round(margin_required, 8)
+            risk["margin_percent"] = round((margin_required / portfolio_value_usd) * 100.0, 6)
+            risk["sizing_model"] = "wallet_risk_max_leverage"
         else:
             risk.setdefault("risk_amount", max_risk_amount)
             risk.setdefault("risk_percent", risk_pct)
 
-        risk.setdefault("risk_reward_ratio", risk_reward_ratio)
+        stop_loss = num(risk.get("stop_loss"))
+        if stop_loss and stop_loss > 0:
+            reward_plan = normalize_reward_plan(
+                risk_summary=risk,
+                entry_price=entry_price,
+                stop_loss=stop_loss,
+                direction="short" if is_short else "long",
+                max_reward_r=max_reward_r,
+                min_reward_r=min_reward_r,
+            )
+            if reward_plan:
+                selected_r = float(reward_plan["selected_reward_r"])
+                take_profit = final_take_profit(reward_plan)
+                risk["reward_plan"] = reward_plan
+                risk["tp_plan"] = reward_plan["levels"]
+                risk["risk_reward_ratio"] = selected_r
+                risk["expected_reward"] = (
+                    float(risk.get("risk_amount") or max_risk_amount) * selected_r
+                )
+                if take_profit:
+                    risk["take_profit"] = take_profit
+
+        risk.setdefault(
+            "risk_reward_ratio",
+            min(max_reward_r, num(bot.risk_reward_ratio, 2.0) or 2.0),
+        )
         decision.risk_summary = risk
 
     async def _dispatch_execution(

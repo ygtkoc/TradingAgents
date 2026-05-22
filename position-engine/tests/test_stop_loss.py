@@ -45,7 +45,11 @@ class TestStopLossLong:
         action = check_stop_loss(trade, current_price=47_000.0)
         assert action.metadata["stop_loss"] == 48_000.0
         assert action.metadata["current_price"] == 47_000.0
+        assert action.metadata["entry_price"] == 50_000.0
         assert action.metadata["direction"] == "long"
+        assert action.metadata["trigger_rule"] == "current_price <= stop_loss"
+        assert action.metadata["stop_distance_pct"] == pytest.approx(4.0)
+        assert action.metadata["price_move_pct"] == pytest.approx(-6.0)
 
     def test_reason_mentions_direction(self):
         trade = make_trade(direction="long", entry_price=50_000.0, stop_loss=48_000.0)
@@ -92,6 +96,9 @@ class TestStopLossShort:
         trade = self._trade(stop_loss=52_000.0)
         action = check_stop_loss(trade, current_price=53_000.0)
         assert action.metadata["direction"] == "short"
+        assert action.metadata["trigger_rule"] == "current_price >= stop_loss"
+        assert action.metadata["stop_distance_pct"] == pytest.approx(4.0)
+        assert action.metadata["price_move_pct"] == pytest.approx(-6.0)
 
     def test_price_one_tick_below_stop_does_not_trigger(self):
         trade = self._trade(stop_loss=52_000.0)

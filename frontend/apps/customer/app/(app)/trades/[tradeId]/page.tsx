@@ -14,7 +14,7 @@ import {
 import { cn, formatCurrency, formatDateTime, formatNumber } from "@ta/utils";
 import {
   AlertTriangle, ArrowDown, ArrowUp, BarChart2, Brain, Clock,
-  ShieldAlert, Zap,
+  ShieldAlert, Target, Zap,
 } from "lucide-react";
 import type { Trade } from "@ta/types";
 import { useQuery } from "@tanstack/react-query";
@@ -103,6 +103,7 @@ export default function TradeDetailPage() {
 
       {/* ── P&L hero ─────────────────────────────────────────────────────────── */}
       <TradeStatePanel trade={trade} isOpen={isOpenLike} latestPrice={latestPrice} pnl={pnlNum} pnlPct={pnlPct} />
+      <CloseExplanation trade={trade} latestPrice={latestPrice} />
 
       <div className={cn(
         "relative overflow-hidden rounded-2xl border p-6 backdrop-blur-sm",
@@ -201,6 +202,7 @@ export default function TradeDetailPage() {
       </div>
 
       <TradingViewPosition trade={trade} pnl={pnlNum} pnlPct={pnlPct} />
+      <TakeProfitPlanCard trade={trade} />
 
       {/* ── Position sizing card ─────────────────────────────────────────────── */}
       {(trade.risk_amount != null || trade.notional != null || trade.risk_reward_ratio != null) ? (
@@ -348,6 +350,54 @@ function TradeStatePanel({
   );
 }
 
+function CloseExplanation({ trade, latestPrice }: { trade: Trade; latestPrice: number | null }) {
+  if (trade.status !== "closed" && trade.lifecycle_status !== "closed") return null;
+
+  const closeReason = trade.close_reason?.replace(/_/g, " ") ?? "closed";
+  const exit = toNum(trade.avg_exit_price ?? trade.exit_price ?? latestPrice);
+  const entry = toNum(trade.avg_fill_price ?? trade.avg_entry_price ?? trade.entry_price);
+  const risk = toNum(trade.risk_amount);
+  const realized = toNum(trade.realized_pnl ?? trade.pnl);
+  const isProtective = trade.close_reason === "stop_loss" || trade.close_reason === "trailing_stop" || trade.close_reason === "emergency";
+  const title = trade.close_reason === "stop_loss"
+    ? "Closed by stop-loss protection"
+    : trade.close_reason === "take_profit"
+      ? "Closed at take-profit target"
+      : trade.close_reason === "trailing_stop"
+        ? "Closed by trailing stop"
+        : trade.close_reason === "emergency"
+          ? "Closed by emergency risk protection"
+          : `Closed: ${closeReason}`;
+  const detail = [
+    trade.close_reason === "stop_loss"
+      ? "This is expected risk-control behavior when price reaches the configured stop level."
+      : trade.close_reason === "take_profit"
+        ? "This is expected profit-taking behavior when price reaches the configured target."
+        : isProtective
+          ? "This was a protective lifecycle action, not a new agent decision."
+          : "The close reason was recorded by the lifecycle engine.",
+    entry != null ? `Entry ${formatPrice(entry)}.` : null,
+    exit != null ? `Close ${formatPrice(exit)}.` : null,
+    risk != null ? `Risk budget ${formatCurrency(risk)}.` : null,
+    realized != null ? `Realized P&L ${formatCurrency(realized)}.` : null,
+  ].filter(Boolean).join(" ");
+
+  return (
+    <div className={cn(
+      "rounded-xl border px-4 py-3 text-[13px] leading-relaxed",
+      trade.close_reason === "take_profit"
+        ? "border-success/25 bg-success/5 text-success"
+        : isProtective
+          ? "border-destructive/25 bg-destructive/5 text-destructive"
+          : "border-border/40 bg-card/50 text-muted-foreground",
+    )}>
+      <div className="text-[9px] font-semibold uppercase tracking-[0.12em] opacity-70">Close explanation</div>
+      <div className="mt-1 font-semibold text-foreground">{title}</div>
+      <div className="mt-0.5">{detail}</div>
+    </div>
+  );
+}
+
 function StateTile({
   label,
   value,
@@ -358,7 +408,7 @@ function StateTile({
   label: string;
   value: string;
   detail: string;
-  tone?: "success" | "warning" | "muted";
+  tone?: "success" | "warning" | "destructive" | "muted";
   className?: string;
 }) {
   return (
@@ -366,6 +416,7 @@ function StateTile({
       "rounded-xl border border-border/40 bg-card/50 px-4 py-3",
       tone === "success" && "border-success/25 bg-success/5",
       tone === "warning" && "border-warning/25 bg-warning/5",
+      tone === "destructive" && "border-destructive/25 bg-destructive/5",
       tone === "muted" && "bg-muted/20",
     )}>
       <div className="text-[9px] font-semibold uppercase tracking-[0.12em] text-muted-foreground/60">{label}</div>
@@ -386,8 +437,25 @@ function TradingViewPosition({
   const widgetUrl = `https://s.tradingview.com/widgetembed/?symbol=${encodeURIComponent(tvSymbol)}&interval=1&hidesidetoolbar=1&symboledit=0&saveimage=0&toolbarbg=f1f3f6&studies=[]&theme=dark&style=1&timezone=Etc%2FUTC&withdateranges=1&hideideas=1`;
   const latestPrice = toNum(trade.metadata?.latest_price);
   const isLong = trade.direction === "long" || trade.side === "buy";
+  const tpLevels = getTpLevels(getRewardPlan(trade.metadata), trade.metadata)
+    .map((level) => {
+      const price = toNum(level.price);
+      if (price == null) return null;
+      return {
+        label: String(level.label ?? `TP${String(level.level ?? "")}`),
+        price,
+        tone: String(level.status ?? "pending") === "hit"
+          ? "text-success border-success/40 bg-success/15"
+          : "text-success border-success/30 bg-success/10",
+      };
+    })
+    .filter((level): level is { label: string; price: number; tone: string } => level != null);
   const levels = [
-    trade.take_profit != null ? { label: "TP", price: Number(trade.take_profit), tone: "text-success border-success/30 bg-success/10" } : null,
+    ...(tpLevels.length > 0
+      ? tpLevels
+      : trade.take_profit != null
+        ? [{ label: "TP", price: Number(trade.take_profit), tone: "text-success border-success/30 bg-success/10" }]
+        : []),
     { label: "ENTRY", price: Number(trade.entry_price), tone: "text-primary border-primary/30 bg-primary/10" },
     latestPrice != null ? { label: "LAST", price: latestPrice, tone: "text-foreground border-border bg-card/90" } : null,
     trade.stop_loss != null ? { label: "SL", price: Number(trade.stop_loss), tone: "text-destructive border-destructive/30 bg-destructive/10" } : null,
@@ -557,12 +625,16 @@ function PositionSvg({
 }
 
 function priceRange(trade: Trade, candles: Candle[] = []): { low: number; high: number } | null {
+  const tpPrices = getTpLevels(getRewardPlan(trade.metadata), trade.metadata)
+    .map((level) => toNum(level.price))
+    .filter((value): value is number => value != null);
   const prices = [
     trade.entry_price,
     trade.stop_loss,
     trade.take_profit,
     trade.exit_price,
     toNum(trade.metadata?.latest_price),
+    ...tpPrices,
     ...candles.flatMap((c) => [c.high, c.low]),
   ].map((v) => toNum(v)).filter((v): v is number => v != null && v > 0);
   if (prices.length === 0) return null;
@@ -617,6 +689,140 @@ function AgentTraceCard({ output }: { output: Record<string, unknown> }) {
       ) : null}
     </div>
   );
+}
+
+function TakeProfitPlanCard({ trade }: { trade: Trade }) {
+  const plan = getRewardPlan(trade.metadata);
+  const levels = getTpLevels(plan, trade.metadata);
+  if (levels.length === 0) return null;
+
+  const selectedR = toNum(plan?.selected_reward_r ?? trade.risk_reward_ratio);
+  const realized = toNum(trade.realized_pnl) ?? 0;
+  const partials = Array.isArray(trade.metadata?.partial_close_history)
+    ? trade.metadata.partial_close_history.length
+    : levels.filter((level) => String(level.status ?? "") === "hit").length;
+
+  return (
+    <Card>
+      <CardHeader>
+        <div className="flex items-center gap-2">
+          <Target className="h-4 w-4 text-muted-foreground/50" />
+          <CardTitle>Scaled take-profit plan</CardTitle>
+        </div>
+        <CardDescription>TP1, TP2, and TP3 partial exits tracked by the position engine.</CardDescription>
+      </CardHeader>
+      <CardContent className="space-y-4">
+        <div className="grid gap-3 sm:grid-cols-3">
+          {levels.map((level) => {
+            const status = String(level.status ?? "pending");
+            const isHit = status === "hit";
+            const closePct = normalizePct(toNum(level.close_pct));
+            const filledQty = toNum(level.filled_quantity);
+            const levelPnl = toNum(level.realized_pnl);
+            return (
+              <div
+                key={`${String(level.label ?? "TP")}-${String(level.level ?? "")}`}
+                className={cn(
+                  "rounded-xl border px-4 py-3",
+                  isHit ? "border-success/25 bg-success/5" : "border-border/40 bg-card/50",
+                )}
+              >
+                <div className="flex items-center justify-between gap-2">
+                  <div className="text-[13px] font-semibold text-foreground">
+                    {String(level.label ?? `TP${String(level.level ?? "")}`)}
+                  </div>
+                  <Badge variant={isHit ? "success" : "secondary"} className="text-[10px]">
+                    {status.replace(/_/g, " ")}
+                  </Badge>
+                </div>
+                <div className="mt-2 space-y-1 text-[12px]">
+                  <TpMetric label="Price" value={toNum(level.price) != null ? formatPrice(Number(level.price)) : "-"} />
+                  <TpMetric label="R" value={toNum(level.r) != null ? `${Number(level.r).toFixed(2)}R` : "-"} />
+                  <TpMetric label="Close" value={closePct != null ? `${closePct.toFixed(0)}%` : "-"} />
+                  {filledQty != null ? <TpMetric label="Filled" value={formatNumber(filledQty, 8)} /> : null}
+                  {levelPnl != null ? (
+                    <TpMetric
+                      label="Realized"
+                      value={formatCurrency(levelPnl)}
+                      tone={levelPnl >= 0 ? "success" : "destructive"}
+                    />
+                  ) : null}
+                </div>
+              </div>
+            );
+          })}
+        </div>
+        <div className="grid gap-3 sm:grid-cols-3">
+          <StateTile
+            label="Selected R"
+            value={selectedR != null ? `${selectedR.toFixed(2)}R` : "-"}
+            detail="AI-selected target"
+          />
+          <StateTile
+            label="Partial exits"
+            value={String(partials)}
+            detail="TP levels filled"
+            tone={partials > 0 ? "success" : "muted"}
+          />
+          <StateTile
+            label="Realized from TPs"
+            value={`${realized >= 0 ? "+" : ""}${formatCurrency(realized)}`}
+            detail="Cumulative realized P&L"
+            tone={realized > 0 ? "success" : realized < 0 ? "destructive" : "muted"}
+          />
+        </div>
+      </CardContent>
+    </Card>
+  );
+}
+
+function TpMetric({
+  label,
+  value,
+  tone,
+}: {
+  label: string;
+  value: string;
+  tone?: "success" | "destructive";
+}) {
+  return (
+    <div className="flex items-baseline justify-between gap-2">
+      <span className="text-[10px] uppercase tracking-wider text-muted-foreground/60">{label}</span>
+      <span className={cn(
+        "font-mono text-[11px] text-foreground",
+        tone === "success" && "text-success",
+        tone === "destructive" && "text-destructive",
+      )}>
+        {value}
+      </span>
+    </div>
+  );
+}
+
+function getRewardPlan(metadata: Record<string, unknown> | null | undefined): Record<string, unknown> | null {
+  const raw = metadata?.reward_plan;
+  return raw && typeof raw === "object" && !Array.isArray(raw)
+    ? raw as Record<string, unknown>
+    : null;
+}
+
+function getTpLevels(
+  plan: Record<string, unknown> | null,
+  metadata: Record<string, unknown> | null | undefined,
+): Record<string, unknown>[] {
+  const fromPlan = plan?.levels;
+  if (Array.isArray(fromPlan)) return fromPlan.filter(isRecord);
+  const fromMetadata = metadata?.tp_plan;
+  return Array.isArray(fromMetadata) ? fromMetadata.filter(isRecord) : [];
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return !!value && typeof value === "object" && !Array.isArray(value);
+}
+
+function normalizePct(value: number | null): number | null {
+  if (value == null) return null;
+  return value <= 1 ? value * 100 : value;
 }
 
 function toNum(value: unknown): number | null {

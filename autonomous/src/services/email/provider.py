@@ -23,7 +23,7 @@ log = get_logger(__name__)
 
 EMAIL_PROVIDER  = os.environ.get("EMAIL_PROVIDER", "log").lower()
 RESEND_API_KEY  = os.environ.get("RESEND_API_KEY", "")
-EMAIL_FROM      = os.environ.get("EMAIL_FROM", "TradingAgents <noreply@tradingagents.local>")
+EMAIL_FROM      = os.environ.get("EMAIL_FROM", "lucrandos <noreply@lucrandos.local>")
 EMAIL_DASHBOARD_URL = os.environ.get("EMAIL_DASHBOARD_URL", "http://localhost:3001")
 
 

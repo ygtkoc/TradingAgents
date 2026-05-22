@@ -1,5 +1,5 @@
 -- ============================================================
--- TradingAgents Platform — Supabase SQL Foundation
+-- lucrandos Platform - Supabase SQL Foundation
 -- Migration: 0001_initial_schema.sql
 -- Generated: 2026-04-24
 --

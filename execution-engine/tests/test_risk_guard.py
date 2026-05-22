@@ -147,7 +147,7 @@ class TestPositionSize:
         result = _run(bot=bot, quantity=0.01, entry_price=50_000.0, portfolio_value_usd=1_000.0)
         check = next(c for c in result.checks if c.name == "position_size_pct")
         assert check.passed
-        assert result.blocked
+        assert not result.blocked
 
     def test_zero_portfolio_blocks(self):
         result = _run(portfolio_value_usd=0.0)
@@ -178,6 +178,35 @@ class TestPositionSize:
         risk = next(c for c in result.checks if c.name == "risk_per_trade")
 
         assert position.passed
+        assert risk.passed
+        assert not result.blocked
+
+    def test_futures_profile_allows_levered_notional_when_wallet_risk_is_bounded(self):
+        bot = make_bot(
+            risk_per_trade_pct=10.0,
+            risk_model="percentage",
+            risk_value=10.0,
+            metadata={"trading_system": "futures_trading"},
+        )
+        decision = make_decision(
+            risk_summary={"entry_price": 100.0, "stop_loss": 99.0, "leverage": 20.0}
+        )
+        result = _run(
+            decision=decision,
+            bot=bot,
+            quantity=100.0,
+            entry_price=100.0,
+            portfolio_value_usd=1_000.0,
+            market_snapshot=make_market_snapshot(close_price=100.0),
+            user_settings=make_user_settings(default_risk_per_trade_pct=10.0),
+        )
+
+        position = next(c for c in result.checks if c.name == "position_size_pct")
+        exposure = next(c for c in result.checks if c.name == "portfolio_exposure")
+        risk = next(c for c in result.checks if c.name == "risk_per_trade")
+
+        assert position.passed
+        assert exposure.passed
         assert risk.passed
         assert not result.blocked
 

@@ -45,6 +45,26 @@ async def _run(fn, *args, **kwargs):
     return await asyncio.to_thread(fn, *args, **kwargs)
 
 
+def _is_transient_lifecycle_error(error: object) -> bool:
+    """Return True for infrastructure errors that should be retried."""
+    if not error:
+        return False
+    text = str(error).lower()
+    transient_markers = (
+        "server disconnected",
+        "connection reset",
+        "connection aborted",
+        "connection closed",
+        "temporarily unavailable",
+        "timeout",
+        "timed out",
+        "network",
+        "http/2",
+        "httpx",
+    )
+    return any(marker in text for marker in transient_markers)
+
+
 # ── Trade Lifecycle Repository ─────────────────────────────────────────────────
 
 class TradeLifecycleRepository:
@@ -140,6 +160,66 @@ class TradeLifecycleRepository:
                 max_age_minutes=max_age_minutes,
             )
         return released
+
+    async def recover_transient_failures(self, limit: int = 50) -> int:
+        """
+        Requeue open trades that failed because of transient infrastructure errors.
+
+        A Supabase/httpx disconnect during P&L update used to leave open trades
+        in lifecycle_status='failed'. Failed trades are not claimable, so SL/TP
+        monitoring silently stopped. Only known transient error messages are
+        recovered here; logic/data failures remain failed for manual inspection.
+        """
+        if settings.dry_run:
+            return 0
+
+        def _select():
+            return (
+                self._client.table("trades")
+                .select("id,lifecycle_error")
+                .in_("status", ["pending", "open"])
+                .eq("lifecycle_status", "failed")
+                .limit(limit)
+                .execute()
+            )
+
+        result = await _run(_select)
+        rows = result.data or []
+        recoverable_ids = [
+            row["id"]
+            for row in rows
+            if _is_transient_lifecycle_error(row.get("lifecycle_error"))
+        ]
+        if not recoverable_ids:
+            return 0
+
+        now = utcnow_iso()
+
+        def _update():
+            return (
+                self._client.table("trades")
+                .update({
+                    "lifecycle_status":          "idle",
+                    "lifecycle_worker_id":       None,
+                    "lifecycle_claimed_at":      None,
+                    "lifecycle_last_checked_at": now,
+                    "lifecycle_error":           None,
+                    "lifecycle_retry_count":     0,
+                })
+                .in_("id", recoverable_ids)
+                .eq("lifecycle_status", "failed")
+                .in_("status", ["pending", "open"])
+                .execute()
+            )
+
+        recovered = await _run(_update)
+        count = len(recovered.data or [])
+        if count:
+            log.warning(
+                "lifecycle.transient_failures_recovered",
+                count=count,
+            )
+        return count
 
     async def claim_for_lifecycle(
         self,

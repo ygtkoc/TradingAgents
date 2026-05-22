@@ -311,7 +311,7 @@ export default function BotEditPage() {
         <Card>
           <CardHeader>
             <CardTitle>Sizing &amp; protective stops</CardTitle>
-            <CardDescription>Protective stops and signal timeframe. Wallet risk is configured in Settings.</CardDescription>
+            <CardDescription>Protective stops and signal timeframe. Wallet risk and max R are configured in Settings.</CardDescription>
           </CardHeader>
           <CardContent className="grid gap-4 sm:grid-cols-2">
             <NumberField
@@ -319,12 +319,6 @@ export default function BotEditPage() {
               value={form.stop_loss_pct}
               step={0.1} min={0.1} max={20}
               onChange={(n) => update_("stop_loss_pct", n)}
-            />
-            <NumberField
-              label="Take profit (%)"
-              value={form.take_profit_pct}
-              step={0.1} min={0.1} max={50}
-              onChange={(n) => update_("take_profit_pct", n)}
             />
             <div className="flex items-center justify-between rounded-xl border border-border/40 bg-card/40 p-4">
               <div>

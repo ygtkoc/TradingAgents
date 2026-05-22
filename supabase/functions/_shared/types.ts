@@ -58,6 +58,8 @@ export interface UserSettings {
   real_trading_requires_approval: boolean
   max_open_trades: number
   default_risk_per_trade_pct: number
+  max_reward_r: number
+  min_reward_r: number
 }
 
 export interface Subscription {

@@ -70,7 +70,13 @@ from src.lifecycle.action import (
 )
 from src.lifecycle.emergency import check_emergency
 from src.lifecycle.pnl import calculate_realized_pnl, calculate_unrealized_pnl, pnl_percentage
+from src.lifecycle.pnl_limits import check_pnl_stop_loss, check_pnl_take_profit
 from src.lifecycle.reconciliation import ReconciliationResult, reconcile_trade
+from src.lifecycle.scaled_take_profit import (
+    check_scaled_take_profit,
+    mark_level_hit,
+    next_stop_after_tp,
+)
 from src.lifecycle.stop_loss import check_stop_loss
 from src.lifecycle.take_profit import check_take_profit
 from src.lifecycle.trailing_stop import check_trailing_stop
@@ -397,18 +403,24 @@ class LifecycleEngine:
         )
         actions.append(emergency)
 
+        # Compute P&L once so price-level and dollar-level triggers use the
+        # same current price for this lifecycle cycle.
+        pnl = calculate_unrealized_pnl(trade, current_price)
+
         # Stop-loss
         actions.append(check_stop_loss(trade, current_price))
+        actions.append(check_pnl_stop_loss(trade, current_price, pnl))
 
         # Take-profit
+        actions.append(check_scaled_take_profit(trade, current_price))
         actions.append(check_take_profit(trade, current_price))
+        actions.append(check_pnl_take_profit(trade, current_price, pnl))
 
         # Trailing stop
         trailing_pct = bot.trailing_stop_pct if bot else None
         actions.append(check_trailing_stop(trade, current_price, trailing_pct))
 
         # Unrealized P&L update (lowest priority trigger)
-        pnl = calculate_unrealized_pnl(trade, current_price)
         actions.append(update_pnl(pnl))
 
         return highest_priority(actions)
@@ -850,8 +862,16 @@ class LifecycleEngine:
         self, trade: Trade, close_price: float, action: LifecycleAction
     ) -> None:
         """Paper/shadow close — no exchange call, mark closed immediately."""
-        realized_pnl = calculate_realized_pnl(trade, close_price)
-        pnl_pct      = pnl_percentage(realized_pnl, trade.effective_entry_price, trade.effective_quantity)
+        if (
+            action.metadata.get("scaled_take_profit")
+            and not action.metadata.get("is_final_tp")
+        ):
+            await self._partial_close_simulated(trade, close_price, action)
+            return
+
+        close_realized_pnl = calculate_realized_pnl(trade, close_price)
+        realized_pnl = float(trade.realized_pnl or 0.0) + close_realized_pnl
+        pnl_pct      = pnl_percentage(realized_pnl, trade.effective_entry_price, _original_quantity(trade))
         r_multiple   = (
             realized_pnl / trade.risk_amount
             if trade.risk_amount and trade.risk_amount > 0
@@ -892,7 +912,7 @@ class LifecycleEngine:
                     exit_price=close_price,
                     quantity=qty,
                     direction=trade.direction,
-                    realized_pnl=realized_pnl,
+                    realized_pnl=close_realized_pnl,
                     reserved_amount=reserved_amount,
                 )
                 await paper_account.sync_unrealized(user_id=trade.user_id)
@@ -911,6 +931,7 @@ class LifecycleEngine:
                 "mode":        trade.mode,
                 "close_price": close_price,
                 "realized_pnl": realized_pnl,
+                "close_realized_pnl": close_realized_pnl,
                 "pnl_pct":      pnl_pct,
                 "r_multiple":   r_multiple,
                 "close_reason": action.reason,
@@ -928,6 +949,7 @@ class LifecycleEngine:
                 "mode":        trade.mode,
                 "close_price": close_price,
                 "realized_pnl": realized_pnl,
+                "close_realized_pnl": close_realized_pnl,
                 "pnl_pct":      pnl_pct,
                 "r_multiple":   r_multiple,
                 "reason":      action.reason,
@@ -940,6 +962,120 @@ class LifecycleEngine:
             await self._notifications.trade_closed(trade=fresh, reason=action.reason)
 
     # ── Live close ─────────────────────────────────────────────────────────────
+
+    async def _partial_close_simulated(
+        self, trade: Trade, close_price: float, action: LifecycleAction
+    ) -> None:
+        """Apply a paper/shadow scaled TP partial close and keep trade open."""
+        qty = trade.effective_quantity
+        close_qty = min(float(action.metadata.get("close_quantity") or 0.0), qty)
+        if close_qty <= 0 or close_qty >= qty:
+            action.metadata["is_final_tp"] = True
+            await self._close_simulated(trade, close_price, action)
+            return
+
+        realized_pnl = _pnl_for_quantity(trade, close_price, close_qty)
+        remaining_qty = max(0.0, qty - close_qty)
+        level_no = int(action.metadata.get("tp_level") or 1)
+        hit_at = utcnow_iso()
+        old_plan = action.metadata.get("reward_plan") or trade.metadata.get("reward_plan") or {}
+        new_plan = mark_level_hit(old_plan, level_no, qty=close_qty, pnl=realized_pnl, hit_at=hit_at)
+        new_stop = next_stop_after_tp(trade, new_plan, level_no)
+        cumulative_realized = float(trade.realized_pnl or 0.0) + realized_pnl
+        original_qty = _original_quantity(trade)
+        reserved_total = (
+            self._paper_reserved_amount(trade) + float(trade.metadata.get("reserved_released") or 0.0)
+            if trade.mode == "paper"
+            else 0.0
+        )
+        reserved_release = (
+            reserved_total * (close_qty / original_qty) if original_qty > 0 else 0.0
+        )
+        metadata = {
+            **trade.metadata,
+            "reward_plan": new_plan,
+            "tp_plan": new_plan.get("levels", []),
+            "scaled_tp_last_hit": level_no,
+            "scaled_tp_realized_pnl": cumulative_realized,
+            "reserved_released": (
+                float(trade.metadata.get("reserved_released") or 0.0) + reserved_release
+            ),
+            "partial_close_history": [
+                *(trade.metadata.get("partial_close_history") or []),
+                {
+                    "tp_level": level_no,
+                    "price": close_price,
+                    "quantity": close_qty,
+                    "realized_pnl": realized_pnl,
+                    "hit_at": hit_at,
+                },
+            ],
+        }
+        remaining_trade = trade.model_copy(update={"filled_quantity": remaining_qty})
+        await self._lifecycle_repo.update_trade(
+            trade.id,
+            TradeUpdateLifecycle(
+                lifecycle_status="idle",
+                filled_quantity=remaining_qty,
+                realized_pnl=cumulative_realized,
+                unrealized_pnl=calculate_unrealized_pnl(remaining_trade, close_price),
+                stop_loss=new_stop,
+                metadata=metadata,
+            ),
+        )
+
+        if trade.mode == "paper":
+            try:
+                paper_account = getattr(self, "_paper_account", None) or PaperAccountService()
+                await paper_account.settle_close(
+                    user_id=trade.user_id,
+                    trade_id=trade.id,
+                    symbol=trade.symbol,
+                    entry_price=trade.effective_entry_price,
+                    exit_price=close_price,
+                    quantity=close_qty,
+                    direction=trade.direction,
+                    realized_pnl=realized_pnl,
+                    reserved_amount=reserved_release,
+                )
+                await paper_account.sync_unrealized(user_id=trade.user_id)
+            except Exception as exc:
+                log.error(
+                    "lifecycle.paper_account_partial_settle_error",
+                    trade_id=trade.id,
+                    error=str(exc)[:300],
+                )
+
+        await self._event_repo.create(TradeEventInsert(
+            trade_id=trade.id,
+            bot_id=trade.bot_id,
+            user_id=trade.user_id,
+            event_type="take_profit_partial_closed",
+            details={
+                "tp_level": level_no,
+                "close_price": close_price,
+                "closed_quantity": close_qty,
+                "remaining_quantity": remaining_qty,
+                "realized_pnl": realized_pnl,
+                "cumulative_realized_pnl": cumulative_realized,
+                "new_stop_loss": new_stop,
+                "reward_plan": new_plan,
+                "reason": action.reason,
+            },
+        ))
+
+        await self._risk_log.create(RiskLogInsert(
+            user_id=trade.user_id,
+            bot_id=trade.bot_id,
+            trade_id=trade.id,
+            risk_type="take_profit_partial_closed",
+            severity=SeverityLevel.INFO.value,
+            triggered=True,
+            message=action.reason[:400],
+            metadata={"tp_level": level_no, "remaining_quantity": remaining_qty},
+        ))
+
+        await self._lifecycle_repo.release_claim(trade.id)
 
     async def _close_live(
         self,
@@ -1023,7 +1159,10 @@ class LifecycleEngine:
         credentials: Optional[ApiCredentials] = None
         adapter: Optional[ExchangeAdapter]    = None
 
-        close_quantity = trade.effective_quantity
+        close_quantity = min(
+            float(action.metadata.get("close_quantity") or trade.effective_quantity),
+            trade.effective_quantity,
+        )
         close_side     = "sell" if trade.is_long else "buy"
         client_order_id = self._make_close_client_order_id(trade)
 
@@ -1182,8 +1321,16 @@ class LifecycleEngine:
         if exchange_status in _CLOSE_FILLED_STATUSES:
             fill_price   = confirmed.avg_fill_price or expected_price
             filled_qty   = confirmed.filled_quantity or trade.effective_quantity
-            realized_pnl = calculate_realized_pnl(trade, fill_price)
-            pnl_pct      = pnl_percentage(realized_pnl, trade.effective_entry_price, trade.effective_quantity)
+            if (
+                action.metadata.get("scaled_take_profit")
+                and not action.metadata.get("is_final_tp")
+            ):
+                action.metadata["close_quantity"] = filled_qty
+                await self._partial_close_simulated(trade, fill_price, action)
+                return
+            close_realized_pnl = calculate_realized_pnl(trade, fill_price)
+            realized_pnl = float(trade.realized_pnl or 0.0) + close_realized_pnl
+            pnl_pct      = pnl_percentage(realized_pnl, trade.effective_entry_price, _original_quantity(trade))
             r_multiple   = (
                 realized_pnl / trade.risk_amount
                 if trade.risk_amount and trade.risk_amount > 0
@@ -1224,6 +1371,7 @@ class LifecycleEngine:
                     "mode":        trade.mode,
                     "close_price": fill_price,
                     "realized_pnl": realized_pnl,
+                    "close_realized_pnl": close_realized_pnl,
                     "pnl_pct":      pnl_pct,
                     "r_multiple":   r_multiple,
                     "order_id":    place_result.order_id,
@@ -1238,8 +1386,9 @@ class LifecycleEngine:
         elif exchange_status in _CLOSE_PARTIAL_STATUSES:
             fill_price  = confirmed.avg_fill_price or expected_price
             filled_qty  = confirmed.filled_quantity or 0.0
-            realized_pnl = calculate_realized_pnl(trade, fill_price)
-            pnl_pct      = pnl_percentage(realized_pnl, trade.effective_entry_price, trade.effective_quantity)
+            close_realized_pnl = calculate_realized_pnl(trade, fill_price)
+            realized_pnl = float(trade.realized_pnl or 0.0) + close_realized_pnl
+            pnl_pct      = pnl_percentage(realized_pnl, trade.effective_entry_price, _original_quantity(trade))
             r_multiple   = (
                 realized_pnl / trade.risk_amount
                 if trade.risk_amount and trade.risk_amount > 0
@@ -1354,7 +1503,8 @@ class LifecycleEngine:
             except (TypeError, ValueError):
                 continue
             if amount > 0:
-                return amount
+                released = float(trade.metadata.get("reserved_released") or 0.0)
+                return max(0.0, amount - released)
         return 0.0
 
     async def _fail(self, trade: Trade, error: str) -> None:
@@ -1405,3 +1555,28 @@ def _action_to_close_reason(atype: ActionType) -> str:
         ActionType.CLOSE_TRAILING_STOP: "trailing_stop",
         ActionType.CLOSE_EMERGENCY:     "emergency",
     }.get(atype, "manual")
+
+
+def _pnl_for_quantity(trade: Trade, exit_price: float, quantity: float) -> float:
+    entry = trade.effective_entry_price
+    if quantity <= 0 or entry <= 0 or exit_price <= 0:
+        return 0.0
+    if trade.is_long:
+        return (exit_price - entry) * quantity
+    return (entry - exit_price) * quantity
+
+
+def _original_quantity(trade: Trade) -> float:
+    for value in (
+        trade.metadata.get("initial_quantity"),
+        trade.metadata.get("original_quantity"),
+        trade.quantity,
+        trade.effective_quantity,
+    ):
+        try:
+            qty = float(value or 0.0)
+        except (TypeError, ValueError):
+            continue
+        if qty > 0:
+            return qty
+    return 0.0

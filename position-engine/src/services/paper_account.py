@@ -8,9 +8,9 @@ shared Python package.
 Settlement math:
     reserved_returned = trade.metadata.reserved_amount (the original reservation)
     realised_pnl      = (exit - entry) * qty * sign(direction)
-    delta             = reserved_returned + realised_pnl
 
-    paper_accounts.balance      += delta
+    paper_accounts.balance      += realised_pnl
+    paper_accounts.reserved_balance -= reserved_returned
     paper_accounts.realized_pnl += realised_pnl
 
 A `paper_account_events` row is appended for the audit ledger.
@@ -78,19 +78,21 @@ class PaperAccountService:
 
             notional   = float(entry_price) * float(quantity)
             reserved   = max(0.0, float(reserved_amount or 0.0))
-            delta      = reserved + float(realized_pnl)
             balance    = float(acct.get("balance") or 0)
+            reserved_balance = float(acct.get("reserved_balance") or 0)
             realised   = float(acct.get("realized_pnl") or 0)
 
-            new_balance  = balance + delta
+            new_balance  = balance + float(realized_pnl)
+            new_reserved = max(0.0, reserved_balance - reserved)
             new_realised = realised + float(realized_pnl)
 
             def _update():
                 return (
                     self._client.table("paper_accounts")
                     .update({
-                        "balance":      new_balance,
-                        "realized_pnl": new_realised,
+                        "balance":          new_balance,
+                        "reserved_balance": new_reserved,
+                        "realized_pnl":     new_realised,
                     })
                     .eq("id", acct["id"])
                     .eq("user_id", user_id)
@@ -105,7 +107,7 @@ class PaperAccountService:
                         "user_id":          user_id,
                         "trade_id":         trade_id,
                         "event_type":       "trade_close_settle",
-                        "delta":            delta,
+                        "delta":            float(realized_pnl),
                         "realized_delta":   float(realized_pnl),
                         "unrealized_delta": 0,
                         "balance_after":    new_balance,
@@ -120,6 +122,9 @@ class PaperAccountService:
                             "quantity":    quantity,
                             "notional":    notional,
                             "reserved_returned": reserved,
+                            "reserved_before": reserved_balance,
+                            "reserved_after": new_reserved,
+                            "available_after": new_balance - new_reserved,
                             "realized_pnl": realized_pnl,
                         },
                     }).execute()

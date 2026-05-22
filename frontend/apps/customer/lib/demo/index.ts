@@ -19,7 +19,7 @@ export const isDemoMode: boolean = isDemoModeFlag;
 
 export const DEMO_USER: AppUser = {
   id:    "demo-user-00000000-0000-0000-0000-000000000001",
-  email: "demo@tradingagents.local",
+  email: "demo@lucrandos.local",
   role:  "user",
 };
 

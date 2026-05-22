@@ -13,7 +13,7 @@ from src.agents.base import BaseAgent
 from src.agents.data import DataQualityAgent, MarketDataAgent
 from src.agents.analysis import MomentumAgent, PriceActionAgent, TechnicalAnalysisAgent
 from src.agents.critique import ContrarianAgent, ManipulationDetectionAgent
-from src.agents.risk import ChiefRiskOfficerAgent, RiskAuditorAgent
+from src.agents.risk import ChiefRiskOfficerAgent, RewardPlanAgent, RiskAuditorAgent
 from src.agents.security import PromptInjectionDefenseAgent, SecurityGuardianAgent
 from src.agents.system_evolution import SystemEvolutionAgent
 
@@ -26,6 +26,7 @@ AGENT_REGISTRY: dict[str, Type[BaseAgent]] = {
     "ContrarianAgent": ContrarianAgent,
     "ManipulationDetectionAgent": ManipulationDetectionAgent,
     "RiskAuditorAgent": RiskAuditorAgent,
+    "RewardPlanAgent": RewardPlanAgent,
     "ChiefRiskOfficerAgent": ChiefRiskOfficerAgent,
     "SecurityGuardianAgent": SecurityGuardianAgent,
     "PromptInjectionDefenseAgent": PromptInjectionDefenseAgent,
@@ -58,6 +59,7 @@ __all__ = [
     "ContrarianAgent",
     "ManipulationDetectionAgent",
     "RiskAuditorAgent",
+    "RewardPlanAgent",
     "ChiefRiskOfficerAgent",
     "SecurityGuardianAgent",
     "PromptInjectionDefenseAgent",

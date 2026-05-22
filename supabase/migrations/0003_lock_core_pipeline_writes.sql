@@ -1,5 +1,5 @@
 -- ============================================================
--- TradingAgents Platform — Security Patch: Lock Core Pipeline Writes
+-- lucrandos Platform - Security Patch: Lock Core Pipeline Writes
 -- Migration: 0003_lock_core_pipeline_writes.sql
 -- Depends on: 0001_initial_schema.sql
 --

@@ -1,6 +1,6 @@
-# TradingAgents — Frontend Monorepo
+# lucrandos Frontend Monorepo
 
-Multi-app frontend for the TradingAgents platform. Three Next.js 14 (App Router)
+Multi-app frontend for the lucrandos platform. Three Next.js 14 (App Router)
 apps and seven shared packages, orchestrated by Turborepo + pnpm.
 
 | App                 | Port  | Domain                  | Purpose                       |

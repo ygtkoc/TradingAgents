@@ -164,6 +164,7 @@ export function usePaperAccountMutations() {
               currency:         "USD",
               starting_balance: startingBalance,
               balance:          startingBalance,
+              reserved_balance: 0,
               status:           "active",
               started_at:       nowIso,
               paused_at:        null,

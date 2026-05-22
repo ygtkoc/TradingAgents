@@ -83,6 +83,7 @@ Deno.serve((req: Request) =>
           currency,
           starting_balance: startingBalance,
           balance:          startingBalance,
+          reserved_balance: 0,
           status:           "active",
           started_at:       new Date().toISOString(),
           paused_at:        null,

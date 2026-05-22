@@ -11,6 +11,8 @@ export interface PaperAccount {
   currency:          string;
   starting_balance:  number;
   balance:           number;
+  reserved_balance:  number;
+  available_balance: number;
   realized_pnl:      number;
   unrealized_pnl:    number;
   equity:            number;
@@ -37,6 +39,11 @@ function normalizePaperAccount(row: Record<string, unknown>): PaperAccount {
     currency: typeof row.currency === "string" ? row.currency : "USD",
     starting_balance: Number(row.starting_balance ?? 0),
     balance: Number(row.balance ?? 0),
+    reserved_balance: Number(row.reserved_balance ?? 0),
+    available_balance: Number(
+      row.available_balance ??
+      (Number(row.balance ?? 0) - Number(row.reserved_balance ?? 0)),
+    ),
     realized_pnl: Number(row.realized_pnl ?? 0),
     unrealized_pnl: Number(row.unrealized_pnl ?? 0),
     equity: Number(row.equity ?? row.balance ?? 0),

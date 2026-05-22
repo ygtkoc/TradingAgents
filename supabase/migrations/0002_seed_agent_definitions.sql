@@ -1,5 +1,5 @@
 -- ============================================================
--- TradingAgents Platform — Agent Definitions Seed
+-- lucrandos Platform - Agent Definitions Seed
 -- Migration: 0002_seed_agent_definitions.sql
 -- Run after: 0001_initial_schema.sql
 --

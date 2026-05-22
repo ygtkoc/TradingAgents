@@ -5,6 +5,7 @@ missing required secrets.
 from __future__ import annotations
 
 from pathlib import Path
+from typing import Optional
 
 from pydantic import Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
@@ -59,6 +60,14 @@ class Settings(BaseSettings):
     # ── Demo-bot bootstrap ────────────────────────────────────────────────────
     demo_bootstrap_enabled:          bool  = True
     demo_bootstrap_interval_seconds: float = Field(default=30.0, ge=5.0)
+
+    # ── Telegram signal ingestion ───────────────────────────────────────────
+    telegram_ingestion_enabled: bool = False
+    telegram_api_id: Optional[int] = None
+    telegram_api_hash: Optional[str] = None
+    telegram_session_string: Optional[str] = None
+    telegram_listener_reload_seconds: float = Field(default=60.0, ge=10.0)
+    telegram_api_cors_origin: str = "http://localhost:3001"
 
     # ── Health server ─────────────────────────────────────────────────────────
     health_port: int = Field(default=9090, ge=1, le=65535)

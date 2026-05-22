@@ -106,22 +106,40 @@ class TestUserLivePermission:
 
 class TestWithdrawPermission:
     def test_no_withdraw_permission_passes(self):
+        decision = make_decision(mode="live")
+        settings = make_user_settings(
+            trading_enabled=True,
+            real_trading_enabled=True,
+            real_trading_allowed=True,
+        )
         account = make_exchange_account(can_withdraw=False)
-        result = _run(exchange_account=account)
+        result = _run(decision=decision, user_settings=settings, exchange_account=account)
         check = next(c for c in result.checks if c.name == "no_withdraw_permission")
         assert check.passed
 
     def test_withdraw_permission_blocks_unconditionally(self):
         """Critical: can_withdraw=True must ALWAYS block regardless of other state."""
+        decision = make_decision(mode="live")
+        settings = make_user_settings(
+            trading_enabled=True,
+            real_trading_enabled=True,
+            real_trading_allowed=True,
+        )
         account = make_exchange_account(can_withdraw=True)
-        result = _run(exchange_account=account)
+        result = _run(decision=decision, user_settings=settings, exchange_account=account)
         check = next(c for c in result.checks if c.name == "no_withdraw_permission")
         assert not check.passed
         assert result.blocked
 
     def test_withdrawal_detected_blocks(self):
+        decision = make_decision(mode="live")
+        settings = make_user_settings(
+            trading_enabled=True,
+            real_trading_enabled=True,
+            real_trading_allowed=True,
+        )
         account = make_exchange_account(can_withdraw=False, withdrawal_detected=True)
-        result = _run(exchange_account=account)
+        result = _run(decision=decision, user_settings=settings, exchange_account=account)
         check = next(c for c in result.checks if c.name == "withdrawal_not_detected")
         assert not check.passed
         assert result.blocked
@@ -129,21 +147,39 @@ class TestWithdrawPermission:
 
 class TestExchangeAccount:
     def test_no_account_blocks(self):
-        result = _run(exchange_account=None)
+        decision = make_decision(mode="live")
+        settings = make_user_settings(
+            trading_enabled=True,
+            real_trading_enabled=True,
+            real_trading_allowed=True,
+        )
+        result = _run(decision=decision, user_settings=settings, exchange_account=None)
         check = next(c for c in result.checks if c.name == "exchange_account_exists")
         assert not check.passed
         assert result.blocked
 
     def test_inactive_account_blocks(self):
+        decision = make_decision(mode="live")
+        settings = make_user_settings(
+            trading_enabled=True,
+            real_trading_enabled=True,
+            real_trading_allowed=True,
+        )
         account = make_exchange_account(is_active=False)
-        result = _run(exchange_account=account)
+        result = _run(decision=decision, user_settings=settings, exchange_account=account)
         check = next(c for c in result.checks if c.name == "exchange_account_active")
         assert not check.passed
         assert result.blocked
 
     def test_cannot_trade_blocks(self):
+        decision = make_decision(mode="live")
+        settings = make_user_settings(
+            trading_enabled=True,
+            real_trading_enabled=True,
+            real_trading_allowed=True,
+        )
         account = make_exchange_account(can_trade=False)
-        result = _run(exchange_account=account)
+        result = _run(decision=decision, user_settings=settings, exchange_account=account)
         check = next(c for c in result.checks if c.name == "can_trade")
         assert not check.passed
         assert result.blocked

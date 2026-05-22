@@ -3,7 +3,7 @@
 import { cn } from "@ta/utils";
 import {
   Activity, Bell, Bot, CandlestickChart,
-  GaugeCircle, KeyRound, ListChecks, Sparkles, Wallet, Settings,
+  GaugeCircle, KeyRound, ListChecks, Send, Sparkles, Wallet, Settings,
   TrendingUp,
 } from "lucide-react";
 import Link from "next/link";
@@ -31,6 +31,7 @@ const TRADING: NavItem[] = [
 
 const SYSTEM: NavItem[] = [
   { href: "/bots",          label: "Bots",          icon: Bot },
+  { href: "/telegram",      label: "Telegram",      icon: Send },
   { href: "/decisions",     label: "Decisions",     icon: ListChecks },
   { href: "/notifications", label: "Notifications", icon: Bell },
 ];
@@ -138,7 +139,7 @@ export function Sidebar() {
         </div>
         <div className="min-w-0 leading-tight">
           <div className="truncate text-[13px] font-bold tracking-tight text-foreground">
-            TradingAgents
+            lucrandos
           </div>
           <div className="text-[10px] text-muted-foreground/60">Multi-agent AI</div>
         </div>

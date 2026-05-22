@@ -217,6 +217,10 @@ class TradeDecisionRepository:
         Count recent critical security log events for a user.
         Used by SecurityExecutionGuard to block execution when the user has
         unresolved critical security flags.
+
+        Guard-generated audit rows must not recursively block future decisions.
+        They describe that execution was blocked; they are not the underlying
+        account/security condition that needs review.
         """
         # Supabase doesn't support WHERE created_at > X directly in the SDK's
         # filter chaining, so we use a raw SQL via RPC or approximate with gte.
@@ -231,6 +235,8 @@ class TradeDecisionRepository:
                 .select("id", count="exact")
                 .eq("user_id", user_id)
                 .eq("severity", "critical")
+                .eq("resolved", False)
+                .neq("event_type", "security_guard_blocked_execution")
                 .gte("created_at", cutoff)
                 .execute()
             )

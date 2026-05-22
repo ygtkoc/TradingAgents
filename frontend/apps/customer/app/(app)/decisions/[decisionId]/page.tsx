@@ -7,9 +7,9 @@ import {
 import { cn, formatCurrency, formatDateTime, formatRelative } from "@ta/utils";
 import {
   ArrowLeft, Bot, Brain, ChevronRight, Clock, Shield, ShieldAlert,
-  ShieldCheck, Sparkles, TrendingUp, Zap,
+  ShieldCheck, Sparkles, Target, TrendingUp, Zap,
 } from "lucide-react";
-import type { Trade } from "@ta/types";
+import type { Trade, TradeDecision } from "@ta/types";
 import Link from "next/link";
 import { useParams } from "next/navigation";
 import { useEffect, useMemo, useState } from "react";
@@ -365,11 +365,13 @@ export default function DecisionDetailPage() {
 
       {/* ── Agent voting panel ──────────────────────────────────────────────── */}
       <DecisionExecutionPanel
+        decision={decision}
         decisionStatus={decision.execution_status}
         approvalStatus={decision.approval_status}
         trade={tradeQ.data ?? null}
         isLoading={tradeQ.isLoading}
       />
+      <DecisionTakeProfitPlanCard decision={decision} trade={tradeQ.data ?? null} />
 
       <div>
         <div className="mb-3 flex items-center gap-2">
@@ -506,11 +508,13 @@ export default function DecisionDetailPage() {
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
 function DecisionExecutionPanel({
+  decision,
   decisionStatus,
   approvalStatus,
   trade,
   isLoading,
 }: {
+  decision: TradeDecision;
   decisionStatus: string;
   approvalStatus: string;
   trade: Trade | null;
@@ -518,6 +522,7 @@ function DecisionExecutionPanel({
 }) {
   if (isLoading) return <Skeleton className="h-24 rounded-xl" />;
 
+  const explanation = explainDecisionExecution(decision, trade);
   const isOpened = trade?.status === "open";
   const isClosed = trade?.status === "closed";
   const pnl = trade
@@ -528,30 +533,43 @@ function DecisionExecutionPanel({
   const pnlPct = trade?.pnl_pct != null ? Number(trade.pnl_pct) : null;
 
   return (
-    <div className="grid gap-3 md:grid-cols-4">
-      <DecisionStateTile
-        label="Decision"
-        value={decisionStatus.replace(/_/g, " ")}
-        detail={`Approval: ${approvalStatus.replace(/_/g, " ")}`}
-        tone={decisionStatus === "executed" ? "success" : decisionStatus === "failed" ? "destructive" : "warning"}
-      />
-      <DecisionStateTile
-        label="Trade"
-        value={trade ? trade.status.replace(/_/g, " ") : "No trade"}
-        detail={trade ? trade.lifecycle_status.replace(/_/g, " ") : "Nothing opened yet"}
-        tone={isClosed ? "muted" : isOpened ? "success" : trade ? "warning" : "muted"}
-      />
-      <DecisionStateTile
-        label="Entry"
-        value={trade ? formatPrice(Number(trade.avg_fill_price ?? trade.avg_entry_price ?? trade.entry_price)) : "-"}
-        detail={trade?.filled_quantity != null ? `Filled ${Number(trade.filled_quantity).toFixed(8)}` : "Fill pending"}
-      />
-      <DecisionStateTile
-        label="P&L"
-        value={pnl != null ? `${pnl >= 0 ? "+" : ""}${formatCurrency(pnl)}` : "-"}
-        detail={pnlPct != null ? `${pnlPct >= 0 ? "+" : ""}${pnlPct.toFixed(2)}%` : "No P&L yet"}
-        className={pnl != null && pnl > 0 ? "text-success" : pnl != null && pnl < 0 ? "text-destructive" : undefined}
-      />
+    <div className="space-y-3">
+      <div className={cn(
+        "rounded-xl border px-4 py-3 text-[13px] leading-relaxed",
+        explanation.tone === "success" ? "border-success/25 bg-success/5 text-success"
+        : explanation.tone === "destructive" ? "border-destructive/25 bg-destructive/5 text-destructive"
+        : explanation.tone === "warning" ? "border-warning/25 bg-warning/5 text-warning"
+        : "border-border/40 bg-card/50 text-muted-foreground",
+      )}>
+        <div className="text-[9px] font-semibold uppercase tracking-[0.12em] opacity-70">Execution explanation</div>
+        <div className="mt-1 text-foreground">{explanation.title}</div>
+        <div className="mt-0.5">{explanation.detail}</div>
+      </div>
+      <div className="grid gap-3 md:grid-cols-4">
+        <DecisionStateTile
+          label="Decision"
+          value={decisionStatus.replace(/_/g, " ")}
+          detail={`Approval: ${approvalStatus.replace(/_/g, " ")}`}
+          tone={decisionStatus === "executed" ? "success" : decisionStatus === "failed" ? "destructive" : decisionStatus === "skipped" ? "muted" : "warning"}
+        />
+        <DecisionStateTile
+          label="Trade"
+          value={trade ? trade.status.replace(/_/g, " ") : "No trade"}
+          detail={trade ? trade.lifecycle_status.replace(/_/g, " ") : "Nothing opened yet"}
+          tone={isClosed ? "muted" : isOpened ? "success" : trade ? "warning" : "muted"}
+        />
+        <DecisionStateTile
+          label="Entry"
+          value={trade ? formatPrice(Number(trade.avg_fill_price ?? trade.avg_entry_price ?? trade.entry_price)) : "-"}
+          detail={trade?.filled_quantity != null ? `Filled ${Number(trade.filled_quantity).toFixed(8)}` : "Fill pending"}
+        />
+        <DecisionStateTile
+          label="P&L"
+          value={pnl != null ? `${pnl >= 0 ? "+" : ""}${formatCurrency(pnl)}` : "-"}
+          detail={pnlPct != null ? `${pnlPct >= 0 ? "+" : ""}${pnlPct.toFixed(2)}%` : "No P&L yet"}
+          className={pnl != null && pnl > 0 ? "text-success" : pnl != null && pnl < 0 ? "text-destructive" : undefined}
+        />
+      </div>
     </div>
   );
 }
@@ -584,6 +602,142 @@ function DecisionStateTile({
   );
 }
 
+function DecisionTakeProfitPlanCard({
+  decision,
+  trade,
+}: {
+  decision: TradeDecision;
+  trade: Trade | null;
+}) {
+  const plan = getDecisionRewardPlan(decision, trade);
+  const levels = getDecisionTpLevels(plan, decision, trade);
+  if (levels.length === 0) return null;
+
+  const selectedR = num(plan?.selected_reward_r ?? decision.risk_summary?.risk_reward_ratio ?? trade?.risk_reward_ratio);
+  const realized = num(trade?.realized_pnl) ?? 0;
+
+  return (
+    <Card>
+      <CardHeader>
+        <div className="flex items-center gap-2">
+          <Target className="h-4 w-4 text-muted-foreground/50" />
+          <CardTitle>Take-profit plan</CardTitle>
+        </div>
+        <CardDescription>AI-selected scaled TP levels for this decision.</CardDescription>
+      </CardHeader>
+      <CardContent className="space-y-4">
+        <div className="grid gap-3 md:grid-cols-3">
+          {levels.map((level) => {
+            const status = String(level.status ?? "pending");
+            const closePct = normalizePct(num(level.close_pct));
+            const levelPnl = num(level.realized_pnl);
+            return (
+              <div
+                key={`${String(level.label ?? "TP")}-${String(level.level ?? "")}`}
+                className={cn(
+                  "rounded-xl border px-4 py-3",
+                  status === "hit" ? "border-success/25 bg-success/5" : "border-border/40 bg-card/50",
+                )}
+              >
+                <div className="flex items-center justify-between gap-2">
+                  <div className="text-[13px] font-semibold text-foreground">
+                    {String(level.label ?? `TP${String(level.level ?? "")}`)}
+                  </div>
+                  <Badge variant={status === "hit" ? "success" : "secondary"} className="text-[10px]">
+                    {status.replace(/_/g, " ")}
+                  </Badge>
+                </div>
+                <div className="mt-2 space-y-1">
+                  <PlanMetric label="Price" value={num(level.price) != null ? formatPrice(Number(level.price)) : "-"} />
+                  <PlanMetric label="R" value={num(level.r) != null ? `${Number(level.r).toFixed(2)}R` : "-"} />
+                  <PlanMetric label="Close" value={closePct != null ? `${closePct.toFixed(0)}%` : "-"} />
+                  {levelPnl != null ? (
+                    <PlanMetric
+                      label="Realized"
+                      value={formatCurrency(levelPnl)}
+                      tone={levelPnl >= 0 ? "success" : "destructive"}
+                    />
+                  ) : null}
+                </div>
+              </div>
+            );
+          })}
+        </div>
+        <div className="grid gap-3 md:grid-cols-3">
+          <DecisionStateTile
+            label="Selected R"
+            value={selectedR != null ? `${selectedR.toFixed(2)}R` : "-"}
+            detail="Chosen by Reward Plan Agent"
+          />
+          <DecisionStateTile
+            label="Final TP"
+            value={num(levels.at(-1)?.price) != null ? formatPrice(Number(levels.at(-1)?.price)) : "-"}
+            detail="Last remaining quantity"
+          />
+          <DecisionStateTile
+            label="Realized"
+            value={`${realized >= 0 ? "+" : ""}${formatCurrency(realized)}`}
+            detail={trade ? "Updated after partial TP fills" : "No trade linked yet"}
+            tone={realized > 0 ? "success" : realized < 0 ? "destructive" : "muted"}
+          />
+        </div>
+      </CardContent>
+    </Card>
+  );
+}
+
+function PlanMetric({
+  label,
+  value,
+  tone,
+}: {
+  label: string;
+  value: string;
+  tone?: "success" | "destructive";
+}) {
+  return (
+    <div className="flex items-baseline justify-between gap-2">
+      <span className="text-[10px] uppercase tracking-wider text-muted-foreground/60">{label}</span>
+      <span className={cn(
+        "font-mono text-[11px] text-foreground",
+        tone === "success" && "text-success",
+        tone === "destructive" && "text-destructive",
+      )}>
+        {value}
+      </span>
+    </div>
+  );
+}
+
+function getDecisionRewardPlan(decision: TradeDecision, trade: Trade | null): Record<string, unknown> | null {
+  const tradePlan = trade?.metadata?.reward_plan;
+  if (isRecord(tradePlan)) return tradePlan;
+  const decisionPlan = decision.risk_summary?.reward_plan;
+  return isRecord(decisionPlan) ? decisionPlan : null;
+}
+
+function getDecisionTpLevels(
+  plan: Record<string, unknown> | null,
+  decision: TradeDecision,
+  trade: Trade | null,
+): Record<string, unknown>[] {
+  const planLevels = plan?.levels;
+  if (Array.isArray(planLevels)) return planLevels.filter(isRecord);
+  const tradeLevels = trade?.metadata?.tp_plan;
+  if (Array.isArray(tradeLevels)) return tradeLevels.filter(isRecord);
+  const decisionLevels = decision.risk_summary?.tp_plan;
+  return Array.isArray(decisionLevels) ? decisionLevels.filter(isRecord) : [];
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return !!value && typeof value === "object" && !Array.isArray(value);
+}
+
+function normalizePct(value: number | null): number | null {
+  if (value == null) return null;
+  return value <= 1 ? value * 100 : value;
+}
+
 function num(value: unknown): number | null {
   if (typeof value === "number" && Number.isFinite(value)) return value;
   if (typeof value === "string") { const n = Number(value); if (Number.isFinite(n)) return n; }
@@ -591,6 +745,81 @@ function num(value: unknown): number | null {
 }
 
 function numOrNull(value: unknown): number | null { return num(value); }
+
+function explainDecisionExecution(decision: TradeDecision, trade: Trade | null): {
+  title: string;
+  detail: string;
+  tone: "success" | "warning" | "destructive" | "muted";
+} {
+  const finalDecision = decision.final_decision.replace(/_/g, " ");
+  const approval = decision.approval_status.replace(/_/g, " ");
+  const execution = decision.execution_status.replace(/_/g, " ");
+  const error = typeof decision.execution_error === "string" && decision.execution_error.trim()
+    ? decision.execution_error.trim()
+    : null;
+
+  if (trade) {
+    return {
+      title: "This decision opened a trade.",
+      detail: `Execution status is ${execution}; linked trade status is ${trade.status.replace(/_/g, " ")}.`,
+      tone: trade.status === "closed" ? "muted" : "success",
+    };
+  }
+
+  if (!["open_long", "open_short"].includes(decision.final_decision)) {
+    return {
+      title: "No trade was opened by design.",
+      detail: `Only open long/open short decisions are executable. This row ended as ${finalDecision}, so score alone is not enough to create a position.`,
+      tone: decision.final_decision === "reject" || decision.final_decision === "pause_trading" ? "destructive" : "muted",
+    };
+  }
+
+  if (!["approved", "auto_approved"].includes(decision.approval_status)) {
+    return {
+      title: "Execution is waiting for approval.",
+      detail: `The decision is ${finalDecision}, but approval is ${approval}. The execution engine only claims approved or auto approved rows.`,
+      tone: "warning",
+    };
+  }
+
+  if (decision.execution_status === "pending_execution") {
+    return {
+      title: "Approved, but not claimed by the execution engine yet.",
+      detail: "If this stays here, check whether the execution-engine worker is running and whether the decision is still unlinked.",
+      tone: "warning",
+    };
+  }
+
+  if (decision.execution_status === "executing") {
+    return {
+      title: "Execution is currently in progress.",
+      detail: "The worker has claimed this decision. If it remains in this state too long, the stuck-execution recovery should release or fail it.",
+      tone: "warning",
+    };
+  }
+
+  if (decision.execution_status === "skipped") {
+    return {
+      title: "Execution was intentionally skipped.",
+      detail: error ?? "A guard blocked execution, usually to enforce live gate, risk, security, or exposure rules.",
+      tone: "muted",
+    };
+  }
+
+  if (decision.execution_status === "failed") {
+    return {
+      title: "Execution failed before opening a trade.",
+      detail: error ?? "No execution error was recorded; inspect raw decision data and service logs.",
+      tone: "destructive",
+    };
+  }
+
+  return {
+    title: "No linked trade found.",
+    detail: `Decision is ${finalDecision}, approval is ${approval}, execution is ${execution}.`,
+    tone: "muted",
+  };
+}
 
 function MetaField({ label, value }: { label: string; value: React.ReactNode }) {
   return (

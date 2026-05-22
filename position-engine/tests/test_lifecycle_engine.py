@@ -275,6 +275,41 @@ class TestPaperCloseStopLoss:
         assert kwargs["pnl_pct"] == 4.0
         assert kwargs["r_multiple"] == 2.0
 
+    def test_final_scaled_tp_keeps_prior_realized_pnl(self):
+        engine = _make_engine()
+        engine._market_data.get_snapshot = AsyncMock(
+            return_value=make_snapshot(close_price=103.0)
+        )
+        plan = {
+            "mode": "scaled_take_profit",
+            "levels": [
+                {"level": 1, "label": "TP1", "price": 101.0, "status": "hit"},
+                {"level": 2, "label": "TP2", "price": 102.0, "status": "hit"},
+                {"level": 3, "label": "TP3", "price": 103.0, "status": "pending"},
+            ],
+        }
+        trade = make_trade(
+            mode="paper",
+            direction="long",
+            entry_price=100.0,
+            take_profit=103.0,
+            quantity=10.0,
+            filled_quantity=4.0,
+            realized_pnl=10.0,
+            risk_amount=10.0,
+            metadata={
+                "reward_plan": plan,
+                "initial_quantity": 10.0,
+                "reserved_on_open": False,
+            },
+        )
+
+        run(engine._run_pipeline(trade))
+
+        kwargs = engine._lifecycle_repo.mark_closed.await_args.kwargs
+        assert kwargs["realized_pnl"] == pytest.approx(22.0)
+        assert kwargs["r_multiple"] == pytest.approx(2.2)
+
 
 # ── Paper close (CLOSE_TAKE_PROFIT) ───────────────────────────────────────────
 

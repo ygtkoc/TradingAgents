@@ -1,8 +1,8 @@
 {
-  "name": "tradingagents-frontend",
+  "name": "lucrandos-frontend",
   "private": true,
   "version": "0.0.0",
-  "description": "TradingAgents frontend monorepo — marketing, customer, admin apps",
+  "description": "lucrandos frontend monorepo - marketing, customer, admin apps",
   "engines": {
     "node": ">=20.0.0",
     "pnpm": ">=9.0.0"

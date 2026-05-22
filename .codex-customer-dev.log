@@ -1,0 +1,36 @@
+
+> @ta/customer@0.0.0 dev C:\Users\Valin\Desktop\TradingAgents\frontend\apps\customer
+> next dev -p 3001
+
+  ▲ Next.js 14.2.35
+  - Local:        http://localhost:3001
+  - Environments: .env.local
+
+ ✓ Starting...
+ ✓ Ready in 2.3s
+ ○ Compiling /middleware ...
+ ✓ Compiled /middleware in 520ms (137 modules)
+ ○ Compiling /sign-in ...
+ ✓ Compiled /sign-in in 5.9s (1061 modules)
+ GET /sign-in?next=%2Fnotifications 200 in 6374ms
+ ✓ Compiled in 567ms (538 modules)
+ GET /sign-in?next=%2Fnotifications 200 in 73ms
+ ○ Compiling /dashboard ...
+ ✓ Compiled /dashboard in 5.3s (2351 modules)
+ GET /dashboard 200 in 6684ms
+ ○ Compiling /paper ...
+ ✓ Compiled /paper in 1915ms (2387 modules)
+ ○ Compiling /trades/[tradeId] ...
+ ✓ Compiled /trades/[tradeId] in 2.1s (2411 modules)
+ ○ Compiling /trades ...
+ ✓ Compiled /trades in 4.5s (2419 modules)
+ ○ Compiling /paper/[ledgerType] ...
+ ✓ Compiled /paper/[ledgerType] in 1716ms (2431 modules)
+ ✓ Compiled in 5.9s (1900 modules)
+ ✓ Compiled in 1704ms (1914 modules)
+ ✓ Compiled in 463ms (1914 modules)
+ ✓ Compiled in 345ms (1165 modules)
+ ✓ Compiled in 493ms (1165 modules)
+ ✓ Compiled in 983ms (1900 modules)
+ ○ Compiling /notifications ...
+ ✓ Compiled /notifications in 2.6s (1910 modules)

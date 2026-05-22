@@ -5,7 +5,7 @@ build-backend = "hatchling.build"
 [project]
 name = "trading-agent-engine"
 version = "0.1.0"
-description = "Multi-agent AI orchestration engine for the TradingAgents platform"
+description = "Multi-agent AI orchestration engine for the lucrandos platform"
 requires-python = ">=3.11"
 
 dependencies = [

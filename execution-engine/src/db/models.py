@@ -161,6 +161,8 @@ class UserSettings(BaseModel):
     max_concurrent_trades:         Optional[int] = None
     daily_loss_limit_usd:          Optional[float] = None
     default_risk_per_trade_pct:    float = 2.0
+    max_reward_r:                  float = 5.0
+    min_reward_r:                  float = 1.5
 
 
 class ExchangeAccount(BaseModel):

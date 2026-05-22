@@ -263,6 +263,9 @@ class TradeUpdateLifecycle(BaseModel):
     filled_quantity:           Optional[float] = None  # reconciliation partial-fill update
     avg_fill_price:            Optional[float] = None
     avg_entry_price:           Optional[float] = None
+    stop_loss:                 Optional[float] = None
+    take_profit:               Optional[float] = None
+    metadata:                  Optional[dict[str, Any]] = None
 
     def to_db_dict(self) -> dict:
         """Return only non-None fields for the DB update."""

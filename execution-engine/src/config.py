@@ -61,6 +61,11 @@ class Settings(BaseSettings):
     max_spread_pct: float = Field(default=2.0, ge=0.0)
     require_stop_loss_live: bool = True
     paper_portfolio_value_usd: float = Field(default=10_000.0, ge=100.0)
+    paper_default_max_leverage: float = Field(default=20.0, ge=1.0)
+    paper_max_leverage_cap: float = Field(default=125.0, ge=1.0)
+    binance_futures_exchange_info_url: str = (
+        "https://fapi.binance.com/fapi/v1/exchangeInfo"
+    )
 
     # ── Fetch batch size ──────────────────────────────────────────────────────
     fetch_batch_size: int = Field(default=5, ge=1)

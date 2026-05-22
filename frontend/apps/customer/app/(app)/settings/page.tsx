@@ -22,25 +22,36 @@ export default function SettingsPage() {
   const settingsQuery      = useUserSettings();
   const { data: settings } = settingsQuery;
   const [walletRiskPct, setWalletRiskPct] = useState("2");
+  const [maxRewardR, setMaxRewardR] = useState("5");
   const [riskStatus, setRiskStatus] = useState<"idle" | "saving" | "saved" | "error">("idle");
 
   useEffect(() => {
     if (settings?.default_risk_per_trade_pct != null) {
       setWalletRiskPct(String(settings.default_risk_per_trade_pct));
     }
-  }, [settings?.default_risk_per_trade_pct]);
+    if (settings?.max_reward_r != null) {
+      setMaxRewardR(String(settings.max_reward_r));
+    }
+  }, [settings?.default_risk_per_trade_pct, settings?.max_reward_r]);
 
   const saveWalletRisk = async () => {
     if (!user) return;
-    const value = Number(walletRiskPct);
-    if (!Number.isFinite(value) || value < 0.1 || value > 10) {
+    const riskValue = Number(walletRiskPct);
+    const rewardValue = Number(maxRewardR);
+    if (
+      !Number.isFinite(riskValue) || riskValue < 0.1 || riskValue > 10 ||
+      !Number.isFinite(rewardValue) || rewardValue < 1 || rewardValue > 10
+    ) {
       setRiskStatus("error");
       return;
     }
     setRiskStatus("saving");
     const { error } = await supabase
       .from("user_settings")
-      .update({ default_risk_per_trade_pct: value } as never)
+      .update({
+        default_risk_per_trade_pct: riskValue,
+        max_reward_r: rewardValue,
+      } as never)
       .eq("user_id", user.id);
     if (error) {
       console.error("settings.wallet_risk.update.failed", { error });
@@ -164,10 +175,31 @@ export default function SettingsPage() {
                     ${(1000 * Number(walletRiskPct || 0) / 100).toFixed(2)} 1R.
                   </div>
                   {riskStatus === "saved" ? (
-                    <div className="text-[11px] font-medium text-success">Wallet risk saved.</div>
+                    <div className="text-[11px] font-medium text-success">Trading risk saved.</div>
                   ) : riskStatus === "error" ? (
-                    <div className="text-[11px] font-medium text-destructive">Enter a value from 0.1 to 10.</div>
+                    <div className="text-[11px] font-medium text-destructive">Enter valid wallet risk and max R values.</div>
                   ) : null}
+                </div>
+                <div className="space-y-1.5">
+                  <Label htmlFor="max-reward-r" className="text-[12px] text-muted-foreground/80">
+                    Max reward per trade (R)
+                  </Label>
+                  <Input
+                    id="max-reward-r"
+                    type="number"
+                    value={maxRewardR}
+                    step="0.5"
+                    min="1"
+                    max="10"
+                    onChange={(event) => {
+                      setMaxRewardR(event.target.value);
+                      setRiskStatus("idle");
+                    }}
+                    className="bg-card/40 text-[13px] font-medium"
+                  />
+                  <div className="text-[11px] text-muted-foreground">
+                    Reward Plan Agent can choose lower TP plans, but it will not exceed 1:{Number(maxRewardR || 0).toFixed(1)}R.
+                  </div>
                 </div>
                 <div className="space-y-1.5">
                   <Label htmlFor="daily-loss" className="text-[12px] text-muted-foreground/80">

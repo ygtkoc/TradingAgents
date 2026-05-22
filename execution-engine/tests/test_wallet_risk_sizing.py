@@ -30,3 +30,31 @@ def test_enrich_sizing_makes_one_r_equal_wallet_risk_percent():
     assert risk["quantity"] == pytest.approx(10.0, rel=1e-3)
     assert risk["risk_amount"] == pytest.approx(20.0, rel=1e-3)
     assert risk["risk_percent"] == pytest.approx(2.0, rel=1e-3)
+
+
+def test_enrich_sizing_uses_max_leverage_for_margin_metadata():
+    engine = ExecutionEngine.__new__(ExecutionEngine)
+    bot = make_bot(
+        risk_model="percentage",
+        risk_value=10.0,
+        metadata={"trading_system": "futures_trading", "stop_loss_pct": 1.0},
+    )
+    decision = make_decision(risk_summary={"risk_reward_ratio": 2.0})
+    snapshot = make_market_snapshot(close_price=100.0)
+
+    engine._enrich_missing_risk_summary(
+        decision=decision,
+        bot=bot,
+        market_snapshot=snapshot,
+        portfolio_value_usd=1_000.0,
+        max_leverage=20.0,
+    )
+
+    risk = decision.risk_summary
+
+    assert risk["quantity"] == pytest.approx(100.0, rel=1e-3)
+    assert risk["notional"] == pytest.approx(10_000.0, rel=1e-3)
+    assert risk["leverage"] == pytest.approx(20.0)
+    assert risk["margin_required"] == pytest.approx(500.0, rel=1e-3)
+    assert risk["risk_amount"] == pytest.approx(100.0, rel=1e-3)
+    assert risk["risk_percent"] == pytest.approx(10.0, rel=1e-3)

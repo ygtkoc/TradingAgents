@@ -6,9 +6,9 @@ import { buttonVariants, Card, CardContent, CardDescription, CardHeader, CardTit
 export default function HomePage() {
   return (
     <main className="mx-auto flex min-h-screen max-w-5xl flex-col items-center justify-center gap-8 px-6 py-16 text-center">
-      <h1 className="text-4xl font-semibold tracking-tight md:text-6xl">TradingAgents</h1>
+      <h1 className="text-4xl font-semibold tracking-tight md:text-6xl">lucrandos</h1>
       <p className="max-w-xl text-balance text-muted-foreground">
-        Multi-agent AI trading platform. Paper trade, shadow test, and execute
+        lucrandos is a multi-agent AI trading platform. Paper trade, shadow test, and execute
         with full audit and risk controls.
       </p>
       <div className="flex gap-3">
@@ -25,9 +25,9 @@ export default function HomePage() {
 
       <Card className="mt-12 w-full max-w-md text-left">
         <CardHeader>
-          <CardTitle>Scaffold ready</CardTitle>
+          <CardTitle>lucrandos scaffold ready</CardTitle>
           <CardDescription>
-            Marketing app placeholder. Real landing copy lands in a follow-up task.
+            Marketing app placeholder for lucrandos. Real landing copy lands in a follow-up task.
           </CardDescription>
         </CardHeader>
         <CardContent className="text-sm text-muted-foreground">

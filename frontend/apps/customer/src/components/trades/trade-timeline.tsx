@@ -48,14 +48,15 @@ export function TradeTimeline({ tradeId }: Props) {
                     {formatDateTime(e.created_at)}
                   </div>
                 </div>
-                <EventDetails details={e.details ?? {}} />
-                {Object.keys(e.details ?? {}).length > 0 ? (
+                <EventExplanation eventType={e.event_type} details={eventDetails(e)} />
+                <EventDetails details={eventDetails(e)} />
+                {Object.keys(eventDetails(e)).length > 0 ? (
                   <details className="mt-2">
                     <summary className="cursor-pointer text-[11px] text-muted-foreground hover:text-foreground">
                       Raw event data
                     </summary>
                     <pre className="mt-1 overflow-auto rounded bg-muted/40 p-2 text-[11px]">
-                      {JSON.stringify(e.details, null, 2)}
+                      {JSON.stringify(eventDetails(e), null, 2)}
                     </pre>
                   </details>
                 ) : null}
@@ -93,12 +94,34 @@ function eventDot(type: string): string {
   return "bg-primary";
 }
 
+function EventExplanation({ eventType, details }: { eventType: string; details: Record<string, unknown> }) {
+  const explanation = explainEvent(eventType, details);
+  if (!explanation) return null;
+
+  return (
+    <div className={cn(
+      "mt-2 rounded-lg border px-3 py-2 text-[12px] leading-relaxed",
+      eventType.includes("stop_loss") || eventType.includes("emergency")
+        ? "border-destructive/25 bg-destructive/5 text-destructive"
+        : eventType.includes("take_profit")
+          ? "border-success/25 bg-success/5 text-success"
+          : "border-border/40 bg-card/40 text-muted-foreground",
+    )}>
+      {explanation}
+    </div>
+  );
+}
+
 function EventDetails({ details }: { details: Record<string, unknown> }) {
   const fields = [
     pickPrice(details, "fill_price", "Fill"),
     pickPrice(details, "entry_price", "Entry"),
     pickPrice(details, "current_price", "Price"),
     pickPrice(details, "close_price", "Close"),
+    pickPrice(details, "stop_loss", "Stop loss"),
+    pickPrice(details, "take_profit", "Take profit"),
+    pickNumber(details, "stop_distance_pct", "Stop distance", "%"),
+    pickNumber(details, "price_move_pct", "Move from entry", "%"),
     pickMoney(details, "realized_pnl", "Realized"),
     pickMoney(details, "unrealized_pnl", "Unrealized"),
     pickNumber(details, "pnl_pct", "P&L %", "%"),
@@ -119,6 +142,58 @@ function EventDetails({ details }: { details: Record<string, unknown> }) {
       ))}
     </div>
   );
+}
+
+function eventDetails(event: { details?: Record<string, unknown> | null; metadata?: Record<string, unknown> | null }) {
+  return (event.details ?? event.metadata ?? {}) as Record<string, unknown>;
+}
+
+function explainEvent(type: string, details: Record<string, unknown>): string | null {
+  const reason = typeof details.reason === "string" ? details.reason : null;
+  const rule = typeof details.trigger_rule === "string" ? details.trigger_rule : null;
+  const current = toNumber(details.current_price ?? details.close_price);
+  const stop = toNumber(details.stop_loss);
+  const takeProfit = toNumber(details.take_profit);
+  const entry = toNumber(details.entry_price);
+  const stopPct = toNumber(details.stop_distance_pct);
+  const movePct = toNumber(details.price_move_pct);
+
+  if (type.includes("stop_loss")) {
+    const parts = [
+      "Stop-loss closed the position to cap downside risk.",
+      current != null && stop != null
+        ? `Price ${formatPrice(current)} reached the stop level ${formatPrice(stop)}${rule ? ` (${rule})` : ""}.`
+        : reason,
+      entry != null ? `Entry was ${formatPrice(entry)}.` : null,
+      stopPct != null ? `Planned stop distance: ${stopPct.toFixed(2)}%.` : null,
+      movePct != null ? `Move from entry at close: ${movePct.toFixed(2)}%.` : null,
+    ];
+    return parts.filter(Boolean).join(" ");
+  }
+
+  if (type.includes("take_profit")) {
+    const parts = [
+      "Take-profit closed the position because the target level was reached.",
+      current != null && takeProfit != null
+        ? `Price ${formatPrice(current)} reached the target ${formatPrice(takeProfit)}.`
+        : reason,
+    ];
+    return parts.filter(Boolean).join(" ");
+  }
+
+  if (type.includes("trailing")) {
+    return reason ?? "Trailing stop logic adjusted or closed the position after price moved back from the best seen level.";
+  }
+
+  if (type.includes("emergency")) {
+    return reason ?? "Emergency risk protection closed or attempted to close the position.";
+  }
+
+  if (type.includes("failed") || type.includes("error")) {
+    return reason ?? "This lifecycle step failed and may require checking the raw event or logs.";
+  }
+
+  return null;
 }
 
 function pickMoney(details: Record<string, unknown>, key: string, label: string) {

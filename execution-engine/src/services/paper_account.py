@@ -62,11 +62,10 @@ class PaperAccountService:
         symbol: str,
         reservation_id: Optional[str] = None,
     ) -> bool:
-        """Debit paper_accounts.balance by the requested paper risk reserve and write a ledger
-        event. Returns False if balance would go negative.
+        """Reserve funds for a new paper position without lowering total balance.
 
-        DB CHECK constraint `balance >= 0` makes the underlying UPDATE fail
-        on race conditions so concurrent opens cannot collectively over-spend.
+        balance is total wallet cash. reserved_balance is tied to open trades.
+        available_balance is generated as balance - reserved_balance.
         """
         if notional <= 0:
             log.warning("paper_account.reserve_skipped_nonpositive",
@@ -79,20 +78,23 @@ class PaperAccountService:
             return False
 
         balance = float(acct.get("balance") or 0)
-        if balance < notional:
+        reserved = float(acct.get("reserved_balance") or 0)
+        available = float(acct.get("available_balance") or (balance - reserved))
+        if available < notional:
             log.warning(
                 "paper_account.insufficient_balance",
-                user_id=user_id, trade_id=trade_id, balance=balance, notional=notional,
+                user_id=user_id, trade_id=trade_id, balance=balance,
+                reserved=reserved, available=available, notional=notional,
             )
             return False
 
-        new_balance = balance - notional
+        new_reserved = reserved + notional
 
-        # 1. Debit balance (constraint protects us on concurrent races).
+        # 1. Reserve funds (constraint protects us on concurrent races).
         def _update():
             return (
                 self._client.table("paper_accounts")
-                .update({"balance": new_balance})
+                .update({"reserved_balance": new_reserved})
                 .eq("id", acct["id"])
                 .eq("user_id", user_id)
                 .execute()
@@ -107,7 +109,7 @@ class PaperAccountService:
         if not (r.data or []):
             return False
 
-        # 2. Append ledger event (best-effort; balance change is already booked).
+        # 2. Append ledger event (best-effort; reserve change is already booked).
         try:
             def _evt():
                 return (
@@ -116,10 +118,10 @@ class PaperAccountService:
                         "user_id":          user_id,
                         "trade_id":         trade_id,
                         "event_type":       "trade_open_reserve",
-                        "delta":            -notional,
+                        "delta":            0,
                         "realized_delta":   0,
                         "unrealized_delta": 0,
-                        "balance_after":    new_balance,
+                        "balance_after":    balance,
                         "realized_after":   acct.get("realized_pnl") or 0,
                         "unrealized_after": acct.get("unrealized_pnl") or 0,
                         "note":             f"open {symbol}",
@@ -127,6 +129,9 @@ class PaperAccountService:
                             "symbol": symbol,
                             "reserve_amount": notional,
                             "reserve_type": "risk_amount",
+                            "reserved_before": reserved,
+                            "reserved_after": new_reserved,
+                            "available_after": balance - new_reserved,
                             "reservation_id": reservation_id,
                             "trade_pending": trade_id is None,
                         },
@@ -139,7 +144,8 @@ class PaperAccountService:
 
         log.info("paper_account.reserved",
                  user_id=user_id, trade_id=trade_id, notional=notional,
-                 balance_after=new_balance)
+                 balance_after=balance, reserved_after=new_reserved,
+                 available_after=balance - new_reserved)
         return True
 
     async def attach_open_reservation(
@@ -203,17 +209,19 @@ class PaperAccountService:
                 return
 
             event = rows[0]
-            amount = abs(float(event.get("delta") or 0))
+            meta = event.get("metadata") or {}
+            amount = abs(float(meta.get("reserve_amount") or event.get("delta") or 0))
             if amount <= 0:
                 return
 
             balance = float(acct.get("balance") or 0)
-            new_balance = balance + amount
+            reserved = float(acct.get("reserved_balance") or 0)
+            new_reserved = max(0.0, reserved - amount)
 
             def _update():
                 return (
                     self._client.table("paper_accounts")
-                    .update({"balance": new_balance})
+                    .update({"reserved_balance": new_reserved})
                     .eq("id", acct["id"])
                     .eq("user_id", user_id)
                     .execute()
@@ -228,10 +236,10 @@ class PaperAccountService:
                         "user_id":          user_id,
                         "trade_id":         None,
                         "event_type":       "trade_open_reserve_released",
-                        "delta":            amount,
+                        "delta":            0,
                         "realized_delta":   0,
                         "unrealized_delta": 0,
-                        "balance_after":    new_balance,
+                        "balance_after":    balance,
                         "realized_after":   acct.get("realized_pnl") or 0,
                         "unrealized_after": acct.get("unrealized_pnl") or 0,
                         "note":             f"release failed open {symbol}",
@@ -240,6 +248,10 @@ class PaperAccountService:
                             "reservation_id": reservation_id,
                             "released_reason": reason[:200],
                             "released_event_id": event.get("id"),
+                            "reserve_amount": amount,
+                            "reserved_before": reserved,
+                            "reserved_after": new_reserved,
+                            "available_after": balance - new_reserved,
                         },
                     }).execute()
                 )

@@ -50,7 +50,7 @@ export default function SignInPage() {
         <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-primary/15 ring-1 ring-primary/20">
           <Activity className="h-5 w-5 text-primary" />
         </div>
-        <span className="text-lg font-bold tracking-tight">TradingAgents</span>
+        <span className="text-lg font-bold tracking-tight">lucrandos</span>
       </header>
 
       {/* Sign-in card */}
@@ -59,7 +59,7 @@ export default function SignInPage() {
           <div className="mb-6">
             <h1 className="text-[20px] font-bold tracking-tight text-foreground">Welcome back</h1>
             <p className="mt-1 text-[13px] text-muted-foreground">
-              Sign in to your TradingAgents dashboard.
+              Sign in to your lucrandos dashboard.
             </p>
           </div>
 

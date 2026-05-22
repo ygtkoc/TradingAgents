@@ -6,6 +6,8 @@ import { useRealtimePaperAccount } from "@/lib/hooks/realtime/use-realtime-paper
 import { useRealtimePlatformSettings } from "@/lib/hooks/realtime/use-realtime-platform-settings";
 import { useRealtimeOpenTrades } from "@/lib/hooks/realtime/use-realtime-trades";
 
+import { TradeOpenedToast } from "./trade-opened-toast";
+
 /**
  * Mount once at the app shell. Wires every shell-level realtime channel
  * into React Query invalidation. Renders nothing.
@@ -16,5 +18,5 @@ export function RealtimeBridge() {
   useRealtimePendingDecisions();
   useRealtimeNotifications();
   useRealtimePlatformSettings();
-  return null;
+  return <TradeOpenedToast />;
 }

@@ -7,6 +7,7 @@ market snapshot / entry price and reserves paper balance when opening.
 """
 from __future__ import annotations
 
+from typing import Any
 from uuid import uuid4
 
 from src.db.models import (
@@ -127,7 +128,13 @@ class PaperExecutor:
                 "reserved_on_open": True,
                 "reserved_amount": risk["reserve_amount"],
                 "notional": notional,
+                "leverage": risk["leverage"],
+                "margin_required": risk["margin_required"],
+                "margin_percent": risk["margin_percent"],
+                "sizing_model": risk["sizing_model"],
                 "reservation_id": reservation_id,
+                "reward_plan": risk["reward_plan"],
+                "tp_plan": risk["tp_plan"],
             },
         )
 
@@ -170,6 +177,8 @@ class PaperExecutor:
                     "notional": notional,
                     "risk_amount": risk["risk_amount"],
                     "risk_percent": risk["risk_percent"],
+                    "reward_plan": risk["reward_plan"],
+                    "tp_plan": risk["tp_plan"],
                     "side": order.side,
                     "symbol": order.symbol,
                     "mode": "paper",
@@ -203,7 +212,7 @@ class PaperExecutor:
         entry_price: float,
         quantity: float,
         notional: float,
-    ) -> dict[str, float | None]:
+    ) -> dict[str, Any]:
         risk_summary = decision.risk_summary or {}
         risk_amount = self._get_float(risk_summary, "risk_amount")
         stop_loss = self._get_float(risk_summary, "stop_loss")
@@ -224,14 +233,29 @@ class PaperExecutor:
         expected_reward = self._get_float(risk_summary, "expected_reward")
         if expected_reward is None and risk_amount is not None and risk_reward_ratio:
             expected_reward = risk_amount * risk_reward_ratio
+        reward_plan = risk_summary.get("reward_plan") or {}
+        tp_plan = risk_summary.get("tp_plan") or reward_plan.get("levels") or []
 
         reserve_amount = risk_amount if risk_amount is not None and risk_amount > 0 else notional
         reserve_amount = min(max(reserve_amount, 0.0), notional)
+
+        leverage = self._get_float(risk_summary, "leverage") or 1.0
+        margin_required = self._get_float(risk_summary, "margin_required")
+        if margin_required is None and leverage > 0:
+            margin_required = notional / leverage
+        margin_percent = self._get_float(risk_summary, "margin_percent")
+        sizing_model = risk_summary.get("sizing_model")
 
         return {
             "risk_amount": risk_amount,
             "risk_percent": risk_percent,
             "risk_reward_ratio": risk_reward_ratio,
             "expected_reward": expected_reward,
+            "reward_plan": reward_plan,
+            "tp_plan": tp_plan,
             "reserve_amount": reserve_amount,
+            "leverage": leverage,
+            "margin_required": margin_required,
+            "margin_percent": margin_percent,
+            "sizing_model": sizing_model,
         }

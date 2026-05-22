@@ -10,6 +10,7 @@ All methods are fire-and-forget: failures are logged but never raise.
 from __future__ import annotations
 
 from src.db.models import Trade, TradeDecision
+from src.db.supabase_client import get_client
 from src.logging_config import get_logger
 
 log = get_logger(__name__)
@@ -32,7 +33,46 @@ class NotificationService:
             entry_price=trade.entry_price,
             quantity=trade.quantity,
         )
-        # TODO: send push/email/realtime notification
+        try:
+            stop_loss = f"{trade.stop_loss:.8g}" if trade.stop_loss else "-"
+            take_profit = f"{trade.take_profit:.8g}" if trade.take_profit else "-"
+            message = (
+                f"{trade.direction.upper()} {trade.symbol} işlemi {trade.entry_price:.8g} giriş fiyatıyla açıldı. "
+                f"Miktar {trade.quantity:.8g}, notional ${(trade.notional or trade.entry_price * trade.quantity):.2f}, "
+                f"SL {stop_loss}, "
+                f"TP {take_profit}, "
+                f"1R ${(trade.risk_amount or 0):.2f}."
+            )
+        except Exception:
+            message = f"{trade.direction.upper()} {trade.symbol} işlemi açıldı."
+
+        try:
+            get_client().table("notifications").insert({
+                "user_id": decision.user_id,
+                "type": "trade_opened",
+                "title": "İşlem açıldı",
+                "message": message,
+                "is_read": False,
+                "related_table": "trades",
+                "related_id": trade.id,
+                "priority": 2,
+                "metadata": {
+                    "trade_id": trade.id,
+                    "symbol": trade.symbol,
+                    "direction": trade.direction,
+                    "side": trade.side,
+                    "mode": trade.mode,
+                    "entry_price": trade.entry_price,
+                    "quantity": trade.quantity,
+                    "notional": trade.notional,
+                    "stop_loss": trade.stop_loss,
+                    "take_profit": trade.take_profit,
+                    "risk_amount": trade.risk_amount,
+                    "risk_percent": trade.risk_percent,
+                },
+            }).execute()
+        except Exception as exc:
+            log.warning("notification.trade_opened_insert_failed", error=str(exc)[:200])
 
     async def trade_skipped(
         self, *, decision: TradeDecision, reason: str

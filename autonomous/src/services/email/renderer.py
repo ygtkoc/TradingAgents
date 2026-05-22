@@ -109,7 +109,7 @@ def render_trade_email(*, trade: dict[str, Any], event_type: str) -> RenderedEma
     {''.join(rows)}
   </table>
   <a class="cta" href="{cta_url}">Open in dashboard</a>
-  <p class="footer">TradingAgents · automated paper-trading notification</p>
+  <p class="footer">lucrandos · automated paper-trading notification</p>
 </div>
 """
 

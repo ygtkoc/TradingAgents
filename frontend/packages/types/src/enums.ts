@@ -52,7 +52,7 @@ export const APPROVAL_STATUS = [
 ] as const;
 export type ApprovalStatus = (typeof APPROVAL_STATUS)[number];
 
-export const EXECUTION_STATUS = ["executing", "executed", "failed", "skipped"] as const;
+export const EXECUTION_STATUS = ["pending_execution", "executing", "executed", "failed", "skipped"] as const;
 export type ExecutionStatus = (typeof EXECUTION_STATUS)[number];
 
 // ── Severity (logs) ──────────────────────────────────────────────────────────

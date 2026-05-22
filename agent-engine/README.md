@@ -1,6 +1,6 @@
 # Agent Engine
 
-The Agent Engine is the AI decision-making core of the TradingAgents platform.
+The Agent Engine is the AI decision-making core of the lucrandos platform.
 It consumes trading signals, runs them through a multi-agent pipeline, and writes
 structured trade decisions to the database. It does **not** execute trades or
 communicate with exchanges.
