@@ -1,4 +1,5 @@
 import pytest
+from unittest.mock import AsyncMock
 
 from src.execution.engine import ExecutionEngine
 from tests.conftest import make_bot, make_decision, make_market_snapshot
@@ -58,3 +59,39 @@ def test_enrich_sizing_uses_max_leverage_for_margin_metadata():
     assert risk["margin_required"] == pytest.approx(500.0, rel=1e-3)
     assert risk["risk_amount"] == pytest.approx(100.0, rel=1e-3)
     assert risk["risk_percent"] == pytest.approx(10.0, rel=1e-3)
+
+
+@pytest.mark.asyncio
+async def test_paper_portfolio_value_uses_actual_account_balance():
+    engine = ExecutionEngine.__new__(ExecutionEngine)
+    engine._paper_account = AsyncMock()
+    engine._paper_account.get_account = AsyncMock(
+        return_value={"balance": 1_000.0, "starting_balance": 10_000.0}
+    )
+
+    value = await engine._get_portfolio_value(
+        exchange_account=None,
+        user_settings=None,
+        market_snapshot=None,
+        decision=make_decision(mode="paper"),
+        execution_mode="paper",
+    )
+
+    assert value == pytest.approx(1_000.0)
+
+
+@pytest.mark.asyncio
+async def test_paper_portfolio_value_fails_closed_without_account():
+    engine = ExecutionEngine.__new__(ExecutionEngine)
+    engine._paper_account = AsyncMock()
+    engine._paper_account.get_account = AsyncMock(return_value=None)
+
+    value = await engine._get_portfolio_value(
+        exchange_account=None,
+        user_settings=None,
+        market_snapshot=None,
+        decision=make_decision(mode="paper"),
+        execution_mode="paper",
+    )
+
+    assert value == 0.0

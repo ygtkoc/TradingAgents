@@ -52,18 +52,18 @@ export function DataTable<TData>({
   });
 
   return (
-    <div className="overflow-hidden rounded-xl border border-border/50 bg-card/80 backdrop-blur-sm">
+    <div className="surface-panel overflow-hidden rounded-lg">
       <Table>
         <TableHeader>
           {table.getHeaderGroups().map((hg) => (
             <TableRow
               key={hg.id}
-              className="border-b border-border/40 bg-muted/20 hover:bg-transparent"
+              className="border-b border-border/50 bg-white/[0.025] hover:bg-transparent"
             >
               {hg.headers.map((header) => (
                 <TableHead
                   key={header.id}
-                  className="text-[10px] font-semibold uppercase tracking-[0.12em] text-muted-foreground/60 py-3"
+                  className="py-3 text-[10px] font-semibold uppercase tracking-[0.14em] text-muted-foreground/70"
                 >
                   {header.isPlaceholder
                     ? null
@@ -100,9 +100,9 @@ export function DataTable<TData>({
                 key={row.id}
                 onClick={onRowClick ? () => onRowClick(row.original) : undefined}
                 className={cn(
-                  "border-b border-border/20 transition-colors",
+                  "border-b border-border/25 transition-colors",
                   "last:border-0",
-                  onRowClick && "cursor-pointer hover:bg-white/[0.02]",
+                  onRowClick && "cursor-pointer hover:bg-primary/[0.035]",
                   rowClassName?.(row.original),
                 )}
               >
@@ -119,7 +119,7 @@ export function DataTable<TData>({
 
       {/* Pagination */}
       {!loading && table.getPageCount() > 1 && (
-        <div className="flex items-center justify-between border-t border-border/30 bg-card/40 px-5 py-3">
+        <div className="flex items-center justify-between border-t border-border/40 bg-white/[0.02] px-5 py-3">
           <span className="text-[11px] text-muted-foreground/60">
             Page {table.getState().pagination.pageIndex + 1} of {table.getPageCount()}
             <span className="ml-2 text-muted-foreground/40">

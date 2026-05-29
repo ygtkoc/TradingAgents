@@ -30,6 +30,18 @@ class TestTakeProfitLong:
         action = check_take_profit(trade, current_price=61_000.0)
         assert action.action_type == ActionType.CLOSE_TAKE_PROFIT
 
+    def test_triggers_when_candle_high_crosses_target(self):
+        trade = make_trade(direction="long", entry_price=50_000.0, take_profit=60_000.0)
+        action = check_take_profit(
+            trade,
+            current_price=59_500.0,
+            high_price=60_200.0,
+            low_price=59_000.0,
+        )
+        assert action.action_type == ActionType.CLOSE_TAKE_PROFIT
+        assert action.close_price == pytest.approx(60_000.0)
+        assert action.metadata["trigger_source"] == "candle_range"
+
     def test_does_not_trigger_when_price_below_target(self):
         trade = make_trade(direction="long", entry_price=50_000.0, take_profit=60_000.0)
         action = check_take_profit(trade, current_price=59_000.0)

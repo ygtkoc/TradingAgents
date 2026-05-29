@@ -169,19 +169,29 @@ async def reconcile_trade(
         )
 
     if trade.status == "open" and exchange_status in _FILLED_STATUSES:
-        return ReconciliationResult(
-            action=LifecycleAction(
-                action_type=ActionType.MARK_NEEDS_RECONCILIATION,
-                reason=(
-                    f"DB trade is open but exchange reports {exchange_status}. "
-                    "Manual reconciliation required."
+        # exchange_order_id is the entry order for an open position. A filled
+        # entry order is normal and must not block SL/TP/trailing evaluation.
+        order_qty = order.filled_quantity or 0.0
+        current_qty = trade.filled_quantity or 0.0
+        if order_qty > 0 and current_qty <= 0:
+            return ReconciliationResult(
+                action=LifecycleAction(
+                    action_type=ActionType.UPDATE_PNL,
+                    reason=f"Open trade entry fill reconciled: filled_quantity={order_qty}",
+                    metadata={
+                        "trigger":             "open_entry_order_filled",
+                        "exchange_status":     exchange_status,
+                        "new_filled_quantity": order_qty,
+                    },
                 ),
-                metadata={
-                    "trigger":         "db_open_exchange_filled",
-                    "exchange_status": exchange_status,
-                    "order_id":        order_id,
-                },
-            ),
+                needs_update=True,
+                new_filled_quantity=order_qty,
+                new_avg_fill_price=order.avg_fill_price or trade.entry_price,
+                exchange_status=exchange_status,
+                order_result=order,
+            )
+        return ReconciliationResult(
+            action=hold(),
             exchange_status=exchange_status,
             order_result=order,
         )

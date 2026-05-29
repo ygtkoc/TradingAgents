@@ -3,7 +3,7 @@
 import {
   Button,
   Card, CardContent, CardDescription, CardHeader, CardTitle,
-  EmptyState, ErrorState, PageHeader, Skeleton,
+  EmptyState, ErrorState, IntelligenceCard, PageHeader, PipelineRail, ProductPage, Skeleton,
 } from "@ta/ui";
 import { cn, formatCurrency, formatRelative } from "@ta/utils";
 import {
@@ -37,29 +37,30 @@ export default function PaperTradingPage() {
   // ── Loading ────────────────────────────────────────────────────────────────
   if (acct.isLoading) {
     return (
-      <div className="mx-auto flex max-w-6xl flex-col gap-5">
+      <ProductPage size="xl">
         <Skeleton className="h-9 w-64 rounded-xl" />
         <Skeleton className="h-52 w-full rounded-2xl" />
         <div className="grid gap-4 lg:grid-cols-2">
           <Skeleton className="h-64 rounded-2xl" />
           <Skeleton className="h-64 rounded-2xl" />
         </div>
-      </div>
+      </ProductPage>
     );
   }
 
   // ── No account yet ─────────────────────────────────────────────────────────
   if (!acct.data) {
     return (
-      <div className="mx-auto flex max-w-3xl flex-col gap-5">
+      <ProductPage size="md">
         <PageHeader
-          title="Paper trading"
-          description="Run autonomous AI agents against live Binance prices with a fully simulated balance."
+          eyebrow="Simulation"
+          title="Paper trading engine"
+          description="Initialize a fully simulated account where autonomous agents analyze real markets and execute paper trades."
         />
 
         {/* Onboarding card */}
         <div className="relative overflow-hidden rounded-2xl border border-primary/20 bg-gradient-to-br from-primary/8 via-card to-card p-8">
-          <div className="pointer-events-none absolute -right-16 -top-16 h-48 w-48 rounded-full bg-primary/10 blur-3xl" />
+          <div className="pointer-events-none absolute inset-x-0 top-0 h-px bg-gradient-to-r from-primary/60 via-cyan-300/35 to-transparent" />
           <div className="relative flex items-start gap-4">
             <div className="flex h-12 w-12 shrink-0 items-center justify-center rounded-2xl bg-primary/15 ring-1 ring-primary/20">
               <Sparkles className="h-6 w-6 text-primary" />
@@ -84,7 +85,7 @@ export default function PaperTradingPage() {
             onRetry={() => void acct.refetch()}
           />
         ) : null}
-      </div>
+      </ProductPage>
     );
   }
 
@@ -104,10 +105,27 @@ export default function PaperTradingPage() {
   const totalNet = totalIncome - totalExpense;
 
   return (
-    <div className="mx-auto flex max-w-6xl flex-col gap-5">
+    <ProductPage size="xl">
       <PageHeader
-        title="Paper trading"
-        description="Autonomous simulation against live Binance prices. Adjust or reset anytime."
+        eyebrow="Paper engine"
+        title="Autonomous paper trading"
+        description="Simulated execution against live Binance prices with account controls, risk accounting, ledger events, and decision history."
+      />
+
+      <div className="grid gap-3 md:grid-cols-4">
+        <IntelligenceCard title="Engine state" value={accountStatus} label="paper lifecycle" tone={accountStatus === "active" ? "emerald" : accountStatus === "paused" ? "amber" : "neutral"} />
+        <IntelligenceCard title="Income" value={formatCurrency(totalIncome)} label="realized positive ledger movement" tone="emerald" />
+        <IntelligenceCard title="Expense" value={formatCurrency(totalExpense)} label="realized negative ledger movement" tone="risk" />
+        <IntelligenceCard title="Net ledger" value={`${totalNet >= 0 ? "+" : ""}${formatCurrency(totalNet)}`} label="paper balance delta" tone={totalNet >= 0 ? "cyan" : "risk"} />
+      </div>
+
+      <PipelineRail
+        steps={[
+          { label: "Market feed", state: accountStatus === "active" ? "active" : "idle" },
+          { label: "Agent consensus", state: "complete" },
+          { label: "Risk check", state: "complete" },
+          { label: "Paper fill", state: openTrades.data?.length ? "active" : "idle" },
+        ]}
       />
 
       {/* Account hero */}
@@ -334,7 +352,7 @@ export default function PaperTradingPage() {
           )}
         </CardContent>
       </Card>
-    </div>
+    </ProductPage>
   );
 }
 

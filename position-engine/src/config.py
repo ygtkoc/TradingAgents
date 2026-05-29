@@ -38,6 +38,7 @@ class Settings(BaseSettings):
     position_poll_interval_seconds: float = Field(default=1.0, ge=1.0)
     position_max_concurrent_runs:   int   = Field(default=5, ge=1)
     position_stale_minutes:         int   = Field(default=10, ge=1)
+    position_stale_seconds:         int   = Field(default=20, ge=5)
     position_max_retries:           int   = Field(default=3, ge=0)
 
     # ── Live Close Gate ───────────────────────────────────────────────────────

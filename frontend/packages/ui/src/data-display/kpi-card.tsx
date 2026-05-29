@@ -46,16 +46,15 @@ export function KpiCard({
   return (
     <div
       className={cn(
-        "relative overflow-hidden rounded-xl border border-border/50",
-        "bg-card/80 backdrop-blur-sm",
-        "transition-all duration-200 hover:border-border hover:bg-card",
+        "surface-panel relative overflow-hidden rounded-lg",
+        "transition-all duration-200 hover:-translate-y-0.5 hover:border-border/85",
         className,
       )}
     >
       {/* Top accent line */}
       <div
         className={cn(
-          "absolute inset-x-0 top-0 h-[2px] rounded-t-xl transition-colors",
+          "absolute inset-x-0 top-0 h-[2px] rounded-t-lg transition-colors",
           ACCENT_BAR[accentKey as keyof typeof ACCENT_BAR],
         )}
       />
@@ -71,7 +70,7 @@ export function KpiCard({
       <div className="relative px-4 pb-4 pt-5">
         {/* Label row */}
         <div className="mb-2 flex items-center justify-between">
-          <span className="text-[11px] font-semibold uppercase tracking-[0.12em] text-muted-foreground">
+        <span className="text-[10px] font-semibold uppercase tracking-[0.14em] text-muted-foreground">
             {label}
           </span>
           {icon ? (
@@ -85,7 +84,7 @@ export function KpiCard({
         ) : (
           <div
             className={cn(
-              "text-2xl font-bold tabular-nums tracking-tight",
+              "metric-number text-2xl font-semibold tracking-[0]",
               trend === "up"   && "text-success",
               trend === "down" && "text-destructive",
               !trend            && "text-foreground",

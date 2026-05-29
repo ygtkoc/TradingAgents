@@ -37,6 +37,7 @@ from tests.conftest import (
     make_platform_settings,
     make_snapshot,
 )
+from src.db.repositories import _is_transient_lifecycle_error
 
 
 # ── Fixtures and helpers ───────────────────────────────────────────────────────
@@ -226,6 +227,36 @@ class TestPaperCloseStopLoss:
         run(engine._run_pipeline(trade))
         engine._lifecycle_repo.mark_closed.assert_awaited_once()
 
+    def test_short_stop_loss_triggers_on_candle_high_even_if_close_below_stop(self):
+        engine = _make_engine()
+        engine._market_data.get_snapshot = AsyncMock(
+            return_value=make_snapshot(
+                symbol="XLM/USDT",
+                open_price=0.2093,
+                high_price=0.2096,
+                low_price=0.2088,
+                close_price=0.2092,
+            )
+        )
+        trade = make_trade(
+            mode="paper",
+            symbol="XLM/USDT",
+            direction="short",
+            side="sell",
+            entry_price=0.2051,
+            avg_fill_price=0.2051,
+            stop_loss=0.209202,
+            quantity=4875.67040468,
+            filled_quantity=4875.67040468,
+        )
+
+        run(engine._run_pipeline(trade))
+
+        engine._lifecycle_repo.mark_closed.assert_awaited_once()
+        kwargs = engine._lifecycle_repo.mark_closed.await_args.kwargs
+        assert kwargs["close_reason"] == "stop_loss"
+        assert kwargs["exit_price"] == pytest.approx(0.209202)
+
     def test_paper_close_does_not_call_exchange(self):
         engine = _make_engine()
         engine._market_data.get_snapshot = AsyncMock(
@@ -333,6 +364,68 @@ class TestPaperCloseTakeProfit:
 
 # ── Emergency close (kill switch) ──────────────────────────────────────────────
 
+    def test_missing_reward_plan_partial_closes_and_moves_stop(self):
+        engine = _make_engine()
+        engine._market_data.get_snapshot = AsyncMock(
+            return_value=make_snapshot(close_price=102.1)
+        )
+        trade = make_trade(
+            mode="paper",
+            direction="long",
+            entry_price=100.0,
+            stop_loss=98.0,
+            take_profit=106.0,
+            quantity=10.0,
+            filled_quantity=10.0,
+            risk_reward_ratio=3.0,
+            risk_amount=20.0,
+            metadata={"reserved_on_open": False},
+        )
+
+        run(engine._run_pipeline(trade))
+
+        engine._lifecycle_repo.mark_closed.assert_not_awaited()
+        update = engine._lifecycle_repo.update_trade.await_args.args[1]
+        assert update.filled_quantity == pytest.approx(7.0)
+        assert update.realized_pnl == pytest.approx(6.3)
+        assert update.stop_loss == pytest.approx(100.0)
+        assert update.take_profit == pytest.approx(103.9)
+        assert update.metadata["reward_plan"]["source"] == "position_engine_fallback"
+
+
+class TestPaperRiskNormalization:
+    def test_oversized_wallet_risk_is_repaired_before_pnl_stop(self):
+        engine = _make_engine()
+        engine._paper_account = MagicMock()
+        engine._paper_account.get_account = AsyncMock(return_value={"balance": 1_000.0})
+        engine._paper_account.settle_close = AsyncMock()
+        engine._paper_account.sync_unrealized = AsyncMock()
+        engine._market_data.get_snapshot = AsyncMock(
+            return_value=make_snapshot(close_price=98.0)
+        )
+        trade = make_trade(
+            mode="paper",
+            direction="long",
+            entry_price=100.0,
+            avg_fill_price=100.0,
+            stop_loss=80.0,
+            take_profit=150.0,
+            quantity=10.0,
+            filled_quantity=10.0,
+            risk_amount=200.0,
+            risk_percent=2.0,
+            risk_reward_ratio=2.0,
+            metadata={"reserved_on_open": False},
+        )
+
+        run(engine._run_pipeline(trade))
+
+        repair_update = engine._lifecycle_repo.update_trade.await_args_list[0].args[1]
+        assert repair_update.risk_amount == pytest.approx(20.0)
+        engine._lifecycle_repo.mark_closed.assert_awaited_once()
+        assert engine._lifecycle_repo.mark_closed.await_args.kwargs["close_reason"] == "stop_loss"
+
+
 class TestEmergencyClose:
     def test_kill_switch_triggers_emergency_close(self):
         engine = _make_engine()
@@ -429,3 +522,7 @@ class TestUnhandledException:
         trade = make_trade(mode="paper", stop_loss=None, take_profit=None)
         # Must not raise
         run(engine.run(trade))
+
+
+def test_max_retry_failures_are_recoverable_for_open_trades():
+    assert _is_transient_lifecycle_error("max retries exceeded (6 > 5)")

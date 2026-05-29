@@ -390,14 +390,20 @@ class ExecutionEngine:
         if execution_mode in ("paper", "shadow"):
             acct = await self._paper_account.get_account(decision.user_id)
             if acct:
-                for key in ("equity", "balance", "starting_balance"):
+                for key in ("equity", "balance", "available_balance", "starting_balance"):
                     try:
                         value = float(acct.get(key) or 0)
                     except (TypeError, ValueError):
                         value = 0.0
                     if value > 0:
                         return value
-            return settings.paper_portfolio_value_usd
+            log.error(
+                "execution.paper_account_missing_for_sizing",
+                decision_id=decision.id,
+                user_id=decision.user_id,
+                execution_mode=execution_mode,
+            )
+            return 0.0
         return settings.paper_portfolio_value_usd
 
     def _estimate_entry_price(

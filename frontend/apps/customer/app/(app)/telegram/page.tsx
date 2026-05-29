@@ -12,6 +12,7 @@ import {
   Input,
   Label,
   PageHeader,
+  ProductPage,
   Select,
   SelectContent,
   SelectItem,
@@ -131,10 +132,11 @@ export default function TelegramSignalsPage() {
   };
 
   return (
-    <div className="mx-auto flex max-w-6xl flex-col gap-5">
+    <ProductPage size="xl">
       <PageHeader
-        title="Telegram Signals"
-        description="Connect Telegram, choose a group or topic, and route its trade calls through the agent pipeline."
+        eyebrow="Signal intake"
+        title="Telegram signal router"
+        description="Connect Telegram, select a group or topic, and route trade calls through parsing, policy checks, and the agent pipeline."
       />
 
       <div className="grid gap-5 lg:grid-cols-[400px_1fr]">
@@ -419,6 +421,6 @@ export default function TelegramSignalsPage() {
           </Card>
         </div>
       </div>
-    </div>
+    </ProductPage>
   );
 }

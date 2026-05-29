@@ -2,8 +2,38 @@ import type { Bot } from "@ta/types";
 
 const now = new Date().toISOString();
 
+const botRuntimeDefaults = {
+  metadata: {},
+  strategy_type: "balanced",
+  last_signal_at: null,
+  next_signal_at: null,
+  risk_model: "percentage",
+  risk_value: 1,
+  risk_reward_ratio: 2,
+  warmup_status: "ready",
+  warmup_started_at: null,
+  warmup_completed_at: now,
+  candles_collected: 100,
+  candles_required: 100,
+} satisfies Pick<
+  Bot,
+  | "metadata"
+  | "strategy_type"
+  | "last_signal_at"
+  | "next_signal_at"
+  | "risk_model"
+  | "risk_value"
+  | "risk_reward_ratio"
+  | "warmup_status"
+  | "warmup_started_at"
+  | "warmup_completed_at"
+  | "candles_collected"
+  | "candles_required"
+>;
+
 export const demoBots: Bot[] = [
   {
+    ...botRuntimeDefaults,
     id:                       "demo-bot-001",
     user_id:                  "demo-user-00000000-0000-0000-0000-000000000001",
     name:                     "BTC Momentum",
@@ -23,8 +53,11 @@ export const demoBots: Bot[] = [
     is_archived:              false,
     created_at:               now,
     updated_at:               null,
+    strategy_type:            "momentum",
+    risk_value:               1.5,
   },
   {
+    ...botRuntimeDefaults,
     id:                       "demo-bot-002",
     user_id:                  "demo-user-00000000-0000-0000-0000-000000000001",
     name:                     "ETH Mean Reversion",
@@ -44,8 +77,11 @@ export const demoBots: Bot[] = [
     is_archived:              false,
     created_at:               now,
     updated_at:               null,
+    strategy_type:            "mean_reversion",
+    risk_value:               1,
   },
   {
+    ...botRuntimeDefaults,
     id:                       "demo-bot-003",
     user_id:                  "demo-user-00000000-0000-0000-0000-000000000001",
     name:                     "SOL Breakout (Live Pilot)",
@@ -65,5 +101,7 @@ export const demoBots: Bot[] = [
     is_archived:              false,
     created_at:               now,
     updated_at:               null,
+    strategy_type:            "scalping",
+    risk_value:               0.5,
   },
 ];

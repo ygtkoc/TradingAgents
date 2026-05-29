@@ -1,6 +1,6 @@
 "use client";
 
-import { Card, CardContent, CardDescription, CardHeader, CardTitle, ErrorState, PageHeader, Skeleton } from "@ta/ui";
+import { Card, CardContent, CardDescription, CardHeader, CardTitle, ErrorState, PageHeader, ProductPage, Skeleton } from "@ta/ui";
 import { ShieldCheck } from "lucide-react";
 
 import { ExchangeCard } from "@/components/exchange/exchange-card";
@@ -18,8 +18,9 @@ export default function ExchangesPage() {
   const byExchange = new Map((conns.data ?? []).map((c) => [c.exchange.toLowerCase(), c]));
 
   return (
-    <div className="mx-auto flex max-w-6xl flex-col gap-5">
+    <ProductPage size="xl">
       <PageHeader
+        eyebrow="Exchange vault"
         title="Exchange connections"
         description="Connect read+trade keys for live execution. Paper trading does not require any connection."
       />
@@ -59,6 +60,6 @@ export default function ExchangesPage() {
               />
             ))}
       </div>
-    </div>
+    </ProductPage>
   );
 }

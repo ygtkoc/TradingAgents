@@ -3,14 +3,14 @@
 import { Activity, Eye, EyeOff, Loader2 } from "lucide-react";
 import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
-import { useState, type FormEvent } from "react";
+import { Suspense, useState, type FormEvent } from "react";
 
 import { Button, Input, Label } from "@ta/ui";
 
 import { isDemoMode } from "@/lib/demo";
 import { supabase }   from "@/lib/supabase/client";
 
-export default function SignInPage() {
+function SignInForm() {
   const router       = useRouter();
   const searchParams = useSearchParams();
   const next         = searchParams.get("next") || "/dashboard";
@@ -147,5 +147,13 @@ export default function SignInPage() {
         </div>
       </div>
     </div>
+  );
+}
+
+export default function SignInPage() {
+  return (
+    <Suspense fallback={<div className="surface-panel h-96 rounded-lg" />}>
+      <SignInForm />
+    </Suspense>
   );
 }

@@ -3,6 +3,7 @@
 import {
   Badge, Button, Card, CardContent, CardDescription, CardHeader, CardTitle,
   Input, Label, PageHeader,
+  ProductPage,
   Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
   Switch,
 } from "@ta/ui";
@@ -81,10 +82,11 @@ export default function NewBotPage() {
   };
 
   return (
-    <div className="mx-auto flex max-w-3xl flex-col gap-6">
+    <ProductPage size="md">
       <PageHeader
-        title="Create a new bot"
-        description="Configure a paper-trading bot. Live mode is only available when an exchange connection is active."
+        eyebrow="Agent configuration"
+        title="Create autonomous agent"
+        description="Configure the strategy, market scope, and protective stops for a trading agent. Live mode stays gated by exchange readiness."
         actions={
           <Link href="/bots">
             <Button size="sm" variant="outline">
@@ -309,7 +311,7 @@ export default function NewBotPage() {
           </Button>
         </div>
       </form>
-    </div>
+    </ProductPage>
   );
 }
 

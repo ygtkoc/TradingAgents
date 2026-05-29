@@ -57,12 +57,25 @@ class TestReconciliation:
     # ── DB open + exchange filled/closed/done ──────────────────────────────────
 
     @pytest.mark.parametrize("ex_status", ["filled", "closed", "done"])
-    def test_db_open_exchange_filled_needs_reconciliation(self, ex_status):
-        trade = make_trade(status="open", exchange_order_id="ord-1")
+    def test_db_open_exchange_filled_entry_order_hold(self, ex_status):
+        trade = make_trade(status="open", exchange_order_id="ord-1", filled_quantity=0.1)
         adapter = _mock_adapter(ex_status)
         result = run(reconcile_trade(trade, adapter))
-        assert result.action.action_type == ActionType.MARK_NEEDS_RECONCILIATION
+        assert result.action.action_type == ActionType.HOLD
         assert result.exchange_status == ex_status
+
+    def test_db_open_exchange_filled_backfills_missing_quantity(self):
+        trade = make_trade(
+            status="open",
+            exchange_order_id="ord-1",
+            quantity=1.0,
+            filled_quantity=0.0,
+        )
+        adapter = _mock_adapter("filled", filled_quantity=0.4)
+        result = run(reconcile_trade(trade, adapter))
+        assert result.action.action_type == ActionType.UPDATE_PNL
+        assert result.needs_update is True
+        assert result.new_filled_quantity == pytest.approx(0.4)
 
     # ── DB open + exchange partially_filled ────────────────────────────────────
 

@@ -43,7 +43,6 @@ export function useRealtimeChannel({
     const ch = supabase
       .channel(channel)
       .on(
-        // @ts-expect-error - Supabase Realtime types are loose for postgres_changes
         "postgres_changes",
         { event, schema, table, filter },
         () => {

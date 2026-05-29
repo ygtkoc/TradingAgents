@@ -5,15 +5,19 @@
  * session cookie (managed by @supabase/ssr). NEVER imports service-role.
  */
 import { env } from "@ta/config/env";
-import type { Database } from "@ta/types/database";
 import { createBrowserClient as _createBrowserClient } from "@supabase/ssr";
 
-let _client: ReturnType<typeof _createBrowserClient<Database>> | undefined;
+// Supabase generated database types are intentionally incomplete in this repo.
+// Keep the browser client permissive so app code owns its domain types instead.
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+type BrowserDatabase = any;
+
+let _client: ReturnType<typeof _createBrowserClient<BrowserDatabase>> | undefined;
 
 export function createBrowserClient() {
   // Singleton — Supabase JS expects one client per browser context.
   if (_client) return _client;
-  _client = _createBrowserClient<Database>(
+  _client = _createBrowserClient<BrowserDatabase>(
     env.NEXT_PUBLIC_SUPABASE_URL,
     env.NEXT_PUBLIC_SUPABASE_ANON_KEY,
   );

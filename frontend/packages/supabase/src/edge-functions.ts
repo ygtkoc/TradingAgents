@@ -66,7 +66,7 @@ async function invoke<TRequest, TResponse>(
       : `${Date.now()}-${Math.random().toString(36).slice(2)}`;
 
   const { data, error } = await sb.functions.invoke<EdgeFunctionResult<TResponse>>(fn, {
-    body,
+    body: body as Record<string, unknown>,
     headers: { "x-idempotency-key": idempotencyKey },
   });
 
@@ -79,6 +79,33 @@ async function invoke<TRequest, TResponse>(
     const isNotFound = ctx?.status === 404 || ctx?.statusText === "Not Found";
 
     let message = error.message || "Edge Function call failed";
+    let code = "edge_function_error";
+    let details: Record<string, unknown> | undefined = ctx
+      ? { status: ctx.status, statusText: ctx.statusText }
+      : undefined;
+
+    const response = (error as unknown as { context?: Response }).context;
+    if (response && typeof response.clone === "function") {
+      try {
+        const payload = await response.clone().json() as {
+          error?: unknown;
+          message?: unknown;
+          code?: unknown;
+        };
+        const serverMessage =
+          typeof payload.error === "string"
+            ? payload.error
+            : typeof payload.message === "string"
+              ? payload.message
+              : null;
+        if (serverMessage) message = serverMessage;
+        if (typeof payload.code === "string") code = payload.code;
+        details = { ...(details ?? {}), response: payload };
+      } catch {
+        // Keep the SDK-level error if the body is not JSON.
+      }
+    }
+
     if (isNotFound) {
       message =
         `Edge Function "${fn}" is not deployed.\n\n` +
@@ -91,9 +118,9 @@ async function invoke<TRequest, TResponse>(
     return {
       ok: false,
       error: {
-        code:    isNotFound ? "edge_function_not_deployed" : "edge_function_error",
+        code:    isNotFound ? "edge_function_not_deployed" : code,
         message,
-        details: ctx ? { status: ctx.status, statusText: ctx.statusText } : undefined,
+        details,
       },
     };
   }

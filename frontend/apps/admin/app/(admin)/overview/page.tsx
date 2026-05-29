@@ -1,49 +1,41 @@
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@ta/ui";
+import { Card, CardContent, CardDescription, CardHeader, CardTitle, IntelligenceCard, PageHeader, PipelineRail, ProductPage } from "@ta/ui";
 
 export default function AdminOverviewPage() {
   return (
-    <div className="mx-auto flex max-w-6xl flex-col gap-6">
-      <header>
-        <h1 className="text-2xl font-semibold tracking-tight">Platform overview</h1>
-        <p className="text-sm text-muted-foreground">
-          Placeholder. Worker health, queue depth, latency, and platform KPIs land in a later task.
-        </p>
-      </header>
+    <ProductPage size="xl">
+      <PageHeader
+        eyebrow="Operations"
+        title="Platform overview"
+        description="Worker health, queue pressure, reconciliation state, and safety posture for the multi-agent trading platform."
+      />
 
-      <div className="grid gap-4 md:grid-cols-4">
-        {[
-          { title: "Workers online",    value: "—" },
-          { title: "Open trades",       value: "—" },
-          { title: "Pending decisions", value: "—" },
-          { title: "needs_reconciliation", value: "—" },
-        ].map((kpi) => (
-          <Card key={kpi.title}>
-            <CardHeader>
-              <CardTitle className="text-sm font-medium text-muted-foreground">
-                {kpi.title}
-              </CardTitle>
-            </CardHeader>
-            <CardContent className="text-3xl font-semibold tabular-nums">
-              {kpi.value}
-            </CardContent>
-          </Card>
-        ))}
+      <div className="grid gap-3 md:grid-cols-4">
+        <IntelligenceCard title="Workers online" value="-" label="agent, execution, position" tone="cyan" />
+        <IntelligenceCard title="Open trades" value="-" label="active lifecycle records" tone="blue" />
+        <IntelligenceCard title="Pending decisions" value="-" label="approval and execution backlog" tone="amber" />
+        <IntelligenceCard title="Reconciliation" value="-" label="positions needing operator review" tone="risk" />
       </div>
+
+      <PipelineRail
+        steps={[
+          { label: "Signal queue", state: "complete" },
+          { label: "Agent workers", state: "active" },
+          { label: "Execution guard", state: "complete" },
+          { label: "Position lifecycle", state: "idle" },
+        ]}
+      />
 
       <Card>
         <CardHeader>
           <CardTitle>Operations note</CardTitle>
           <CardDescription>
-            Every admin write goes through an Edge Function. The kill switch
-            and live-execution flag are subscribed in real time across all
-            admin sessions.
+            Admin writes go through audited Edge Functions. The frontend cannot directly mutate protected trade, decision, signal, or platform setting tables.
           </CardDescription>
         </CardHeader>
-        <CardContent className="text-sm text-muted-foreground">
-          The frontend cannot insert/update trades, decisions, signals, or platform_settings
-          directly — RLS blocks it and ESLint blocks the service-role import.
+        <CardContent className="text-sm leading-6 text-muted-foreground">
+          Kill switch and live-execution flags are subscribed in real time across admin sessions. Service-role access remains blocked from browser code.
         </CardContent>
       </Card>
-    </div>
+    </ProductPage>
   );
 }

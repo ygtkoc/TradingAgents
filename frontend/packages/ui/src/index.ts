@@ -59,3 +59,4 @@ export {
 // ── Layout ───────────────────────────────────────────────────────────────────
 export { AppShell }                          from "./layout/app-shell";
 export { PageHeader }                        from "./layout/page-header";
+export { IntelligenceCard, PipelineRail, ProductPage } from "./layout/product";

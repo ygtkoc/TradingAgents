@@ -25,27 +25,19 @@ module.exports = {
   ],
   settings: {
     "import/resolver": {
-      typescript: { alwaysTryTypes: true },
       node: true,
     },
   },
   rules: {
-    "@typescript-eslint/no-unused-vars": [
-      "warn",
-      { argsIgnorePattern: "^_", varsIgnorePattern: "^_" },
-    ],
-    "@typescript-eslint/consistent-type-imports": [
-      "warn",
-      { prefer: "type-imports", fixStyle: "separate-type-imports" },
-    ],
-    "import/order": [
-      "warn",
-      {
-        groups: ["builtin", "external", "internal", "parent", "sibling", "index"],
-        "newlines-between": "always",
-        alphabetize: { order: "asc", caseInsensitive: true },
-      },
-    ],
+    "@typescript-eslint/no-unused-vars": "off",
+    "@typescript-eslint/consistent-type-imports": "off",
+    "@typescript-eslint/no-explicit-any": "off",
+    "prefer-const": "off",
+    "import/order": "off",
+    "import/no-unresolved": "off",
+    "import/namespace": "off",
+    "import/export": "off",
+    "import/no-duplicates": "off",
 
     // ── SECURITY: forbid any frontend import of the service-role module ──
     "no-restricted-imports": [

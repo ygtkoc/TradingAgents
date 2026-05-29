@@ -3,6 +3,11 @@
   "version": "0.0.0",
   "private": true,
   "main": "index.cjs",
+  "exports": {
+    ".": "./index.cjs",
+    "./next": "./next.cjs",
+    "./library": "./library.cjs"
+  },
   "files": ["index.cjs", "next.cjs", "library.cjs"],
   "dependencies": {
     "@typescript-eslint/eslint-plugin": "^8.7.0",

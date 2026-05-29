@@ -60,7 +60,11 @@ Deno.serve((req: Request) =>
       input.trade_decision_id,
     )
 
-    if (!decision.manual_approval_required) {
+    const isActionableOpenDecision =
+      decision.final_decision === "open_long" ||
+      decision.final_decision === "open_short"
+
+    if (!decision.manual_approval_required && !isActionableOpenDecision) {
       throw Errors.badRequest(
         "This trade decision does not require manual approval",
       )

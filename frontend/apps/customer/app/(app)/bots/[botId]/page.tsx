@@ -7,6 +7,7 @@ import {
   EmptyState,
   ErrorState,
   PageHeader,
+  ProductPage,
   Progress,
   Skeleton,
   Tabs, TabsContent, TabsList, TabsTrigger,
@@ -42,11 +43,11 @@ export default function BotDetailPage() {
 
   if (isLoading || !bot) {
     return (
-      <div className="mx-auto flex max-w-6xl flex-col gap-5">
+      <ProductPage size="xl">
         <Skeleton className="h-9 w-64 rounded-xl" />
         <Skeleton className="h-40 w-full rounded-2xl" />
         <Skeleton className="h-64 w-full rounded-2xl" />
-      </div>
+      </ProductPage>
     );
   }
 
@@ -61,9 +62,10 @@ export default function BotDetailPage() {
   const isReady    = warmupStatus === "ready";
 
   return (
-    <div className="mx-auto flex max-w-6xl flex-col gap-5">
+    <ProductPage size="xl">
       {/* ── Header ─────────────────────────────────────────────────────────── */}
       <PageHeader
+        eyebrow="Agent detail"
         title={bot.name}
         description={`${bot.mode.toUpperCase()} · Created ${formatRelative(bot.created_at)}`}
         actions={
@@ -268,6 +270,6 @@ export default function BotDetailPage() {
           </Card>
         </TabsContent>
       </Tabs>
-    </div>
+    </ProductPage>
   );
 }

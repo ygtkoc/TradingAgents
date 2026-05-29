@@ -3,6 +3,7 @@
 import {
   Badge, Button, Card, CardContent, CardDescription, CardHeader, CardTitle,
   Input, Label, PageHeader,
+  ProductPage,
   Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
   Skeleton,
   Switch,
@@ -128,17 +129,18 @@ export default function BotEditPage() {
 
   if (isLoading || !form) {
     return (
-      <div className="mx-auto flex max-w-3xl flex-col gap-6">
+      <ProductPage size="md">
         <Skeleton className="h-9 w-64 rounded-xl" />
         <Skeleton className="h-64 w-full rounded-2xl" />
         <Skeleton className="h-48 w-full rounded-2xl" />
-      </div>
+      </ProductPage>
     );
   }
 
   return (
-    <div className="mx-auto flex max-w-3xl flex-col gap-6">
+    <ProductPage size="md">
       <PageHeader
+        eyebrow="Agent configuration"
         title={`Edit: ${bot?.name ?? "Bot"}`}
         description="Update this bot's strategy, risk model, and sizing parameters."
         actions={
@@ -396,7 +398,7 @@ export default function BotEditPage() {
           </Button>
         </div>
       </form>
-    </div>
+    </ProductPage>
   );
 }
 

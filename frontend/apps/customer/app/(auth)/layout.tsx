@@ -1,85 +1,69 @@
-import { Activity, BarChart3, Bot, Shield } from "lucide-react";
+import { Activity, BarChart3, Bot, ShieldCheck } from "lucide-react";
 import type { ReactNode } from "react";
 
-/**
- * Premium dark split-card auth layout.
- * Left: brand panel with fintech gradients, stats, features.
- * Right: the auth form, centered on a deep dark bg.
- */
 export default function AuthLayout({ children }: { children: ReactNode }) {
   return (
-    <div className="grid min-h-screen grid-cols-1 lg:grid-cols-2">
-      {/* ── Left: Brand panel ─────────────────────────────────────────────── */}
-      <aside className="relative hidden overflow-hidden bg-card/40 lg:flex lg:flex-col lg:justify-between lg:p-12">
-        {/* Background gradients */}
-        <div className="pointer-events-none absolute inset-0">
-          <div className="absolute -left-24 -top-24 h-96 w-96 rounded-full bg-primary/8 blur-3xl" />
-          <div className="absolute -bottom-24 -right-24 h-64 w-64 rounded-full bg-success/6 blur-3xl" />
-          {/* Subtle grid */}
-          <div className="absolute inset-0 bg-[linear-gradient(hsl(var(--border)/0.15)_1px,transparent_1px),linear-gradient(90deg,hsl(var(--border)/0.15)_1px,transparent_1px)] bg-[size:32px_32px]" />
-          {/* Right edge fade */}
-          <div className="absolute inset-y-0 right-0 w-24 bg-gradient-to-l from-background to-transparent" />
-        </div>
+    <div className="system-backdrop relative grid min-h-screen grid-cols-1 overflow-hidden lg:grid-cols-[1.05fr_0.95fr]">
+      <div className="system-grid pointer-events-none absolute inset-0 opacity-45" />
 
-        {/* Brand mark */}
-        <div className="relative flex items-center gap-2.5">
-          <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-primary/15 ring-1 ring-primary/20">
+      <aside className="relative hidden border-r border-border/60 bg-background/55 p-12 backdrop-blur-2xl lg:flex lg:flex-col lg:justify-between">
+        <div className="flex items-center gap-3">
+          <div className="flex h-11 w-11 items-center justify-center rounded-lg border border-primary/35 bg-primary/12">
             <Activity className="h-5 w-5 text-primary" />
           </div>
           <div>
-            <div className="text-[15px] font-bold tracking-tight text-foreground">lucrandos</div>
-            <div className="text-[10px] text-muted-foreground/60">Multi-agent AI trading</div>
+            <div className="text-[16px] font-semibold tracking-[0] text-foreground">lucrandos</div>
+            <div className="text-[10px] font-semibold uppercase tracking-[0.16em] text-muted-foreground">
+              AI trading OS
+            </div>
           </div>
         </div>
 
-        {/* Hero copy */}
-        <div className="relative space-y-4">
-          <h2 className="text-[28px] font-bold leading-snug tracking-tight text-foreground">
-            Multi-agent AI trading,<br />with the safety rails on.
+        <div className="max-w-xl space-y-6">
+          <div className="text-[11px] font-semibold uppercase tracking-[0.18em] text-primary/80">
+            Autonomous decision infrastructure
+          </div>
+          <h2 className="text-[42px] font-semibold leading-[1.05] tracking-[0] text-foreground">
+            Multi-agent trading with institutional safety rails.
           </h2>
-          <p className="max-w-sm text-[13px] leading-relaxed text-muted-foreground">
-            Paper trade, shadow test, and execute live — with reconciliation,
-            kill switches, and full audit logging built in from day one.
+          <p className="max-w-md text-[14px] leading-7 text-muted-foreground">
+            Agents analyze markets, critique decisions, enforce risk, and route execution through audited gates before a trade can move.
           </p>
-
-          {/* Feature list */}
-          <div className="mt-2 space-y-2.5">
+          <div className="grid gap-3">
             {[
-              { icon: Bot,      label: "5+ AI agents vote on every trade signal" },
-              { icon: BarChart3, label: "15+ technical indicators analyzed in real-time" },
-              { icon: Shield,   label: "Risk, security & sentiment filters on every decision" },
-            ].map(({ icon: Icon, label }) => (
-              <div key={label} className="flex items-center gap-2.5 text-[12px] text-muted-foreground">
-                <div className="flex h-6 w-6 shrink-0 items-center justify-center rounded-lg bg-primary/10">
-                  <Icon className="h-3.5 w-3.5 text-primary" />
+              { icon: Bot, label: "Agent quorum", copy: "analysis, sentiment, risk, critique, security" },
+              { icon: BarChart3, label: "Market intelligence", copy: "live price feeds and technical state" },
+              { icon: ShieldCheck, label: "Fail-closed execution", copy: "kill switch, approval, and permission gates" },
+            ].map(({ icon: Icon, label, copy }) => (
+              <div key={label} className="surface-panel flex items-center gap-3 rounded-lg p-3">
+                <div className="flex h-9 w-9 items-center justify-center rounded-md border border-border/60 bg-card/70">
+                  <Icon className="h-4 w-4 text-primary" />
                 </div>
-                {label}
+                <div>
+                  <div className="text-[13px] font-semibold text-foreground">{label}</div>
+                  <div className="text-[12px] text-muted-foreground">{copy}</div>
+                </div>
               </div>
             ))}
           </div>
         </div>
 
-        {/* Bottom stats */}
-        <div className="relative grid grid-cols-3 gap-3">
+        <div className="grid grid-cols-3 gap-3">
           {[
-            { label: "Modes",   value: "3",           hint: "paper · shadow · live" },
-            { label: "Engines", value: "3",           hint: "agent · execution · position" },
-            { label: "Default", value: "fail-closed", hint: "safety first" },
-          ].map(({ label, value, hint }) => (
-            <div
-              key={label}
-              className="rounded-xl border border-border/40 bg-card/40 p-3 backdrop-blur-sm"
-            >
-              <div className="text-[9px] font-semibold uppercase tracking-[0.12em] text-muted-foreground/50">{label}</div>
-              <div className="mt-1 text-[15px] font-bold text-foreground">{value}</div>
-              <div className="mt-0.5 text-[10px] text-muted-foreground/60">{hint}</div>
+            { label: "Modes", value: "3", hint: "paper / shadow / live" },
+            { label: "Engines", value: "3", hint: "agent / execution / position" },
+            { label: "Posture", value: "safe", hint: "live off by default" },
+          ].map((item) => (
+            <div key={item.label} className="rounded-lg border border-border/55 bg-card/45 p-3">
+              <div className="text-[10px] font-semibold uppercase tracking-[0.14em] text-muted-foreground">{item.label}</div>
+              <div className="metric-number mt-1 text-[20px] font-semibold text-foreground">{item.value}</div>
+              <div className="text-[10px] text-muted-foreground/70">{item.hint}</div>
             </div>
           ))}
         </div>
       </aside>
 
-      {/* ── Right: Form area ────────────────────────────────────────────────── */}
-      <main className="flex items-center justify-center bg-background p-6 sm:p-12">
+      <main className="relative z-10 flex items-center justify-center p-6 sm:p-12">
         <div className="w-full max-w-sm">{children}</div>
       </main>
     </div>

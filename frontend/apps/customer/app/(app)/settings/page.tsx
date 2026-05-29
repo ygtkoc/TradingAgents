@@ -7,6 +7,7 @@ import {
   Input,
   Label,
   PageHeader,
+  ProductPage,
   Switch,
   Tabs, TabsContent, TabsList, TabsTrigger,
 } from "@ta/ui";
@@ -63,10 +64,11 @@ export default function SettingsPage() {
   };
 
   return (
-    <div className="mx-auto flex max-w-3xl flex-col gap-5">
+    <ProductPage size="md">
       <PageHeader
-        title="Settings"
-        description="Profile, security, trading limits, and billing."
+        eyebrow="Control plane"
+        title="Risk policy and account settings"
+        description="Profile, security, wallet risk, reward ceilings, trading limits, and billing."
       />
 
       <Tabs defaultValue="profile">
@@ -274,6 +276,6 @@ export default function SettingsPage() {
           </Card>
         </TabsContent>
       </Tabs>
-    </div>
+    </ProductPage>
   );
 }

@@ -75,6 +75,7 @@ from src.lifecycle.reconciliation import ReconciliationResult, reconcile_trade
 from src.lifecycle.scaled_take_profit import (
     check_scaled_take_profit,
     mark_level_hit,
+    next_take_profit_after_tp,
     next_stop_after_tp,
 )
 from src.lifecycle.stop_loss import check_stop_loss
@@ -290,6 +291,8 @@ class LifecycleEngine:
             await self._lifecycle_repo.release_claim(trade.id)
             return
 
+        trade = await self._normalize_paper_wallet_risk(trade)
+
         action = await self._evaluate_triggers(
             trade=trade,
             current_price=current_price,
@@ -407,17 +410,43 @@ class LifecycleEngine:
         # same current price for this lifecycle cycle.
         pnl = calculate_unrealized_pnl(trade, current_price)
 
+        high_price = market_snapshot.high_price if market_snapshot else current_price
+        low_price = market_snapshot.low_price if market_snapshot else current_price
+
         # Stop-loss
-        actions.append(check_stop_loss(trade, current_price))
+        actions.append(
+            check_stop_loss(
+                trade,
+                current_price,
+                high_price=high_price,
+                low_price=low_price,
+            )
+        )
         actions.append(check_pnl_stop_loss(trade, current_price, pnl))
 
         # Take-profit
-        actions.append(check_scaled_take_profit(trade, current_price))
-        actions.append(check_take_profit(trade, current_price))
+        actions.append(
+            check_scaled_take_profit(
+                trade,
+                current_price,
+                high_price=high_price,
+                low_price=low_price,
+            )
+        )
+        actions.append(
+            check_take_profit(
+                trade,
+                current_price,
+                high_price=high_price,
+                low_price=low_price,
+            )
+        )
         actions.append(check_pnl_take_profit(trade, current_price, pnl))
 
         # Trailing stop
-        trailing_pct = bot.trailing_stop_pct if bot else None
+        trailing_pct = None
+        if bot:
+            trailing_pct = bot.trailing_stop_pct or bot.metadata.get("trailing_stop_pct")
         actions.append(check_trailing_stop(trade, current_price, trailing_pct))
 
         # Unrealized P&L update (lowest priority trigger)
@@ -576,6 +605,76 @@ class LifecycleEngine:
         await self._notifications.reconciliation_required(trade=trade, reason=action.reason)
 
     # ── Reconciliation ────────────────────────────────────────────────────────
+
+    async def _normalize_paper_wallet_risk(self, trade: Trade) -> Trade:
+        """Repair paper trades sized from the execution fallback portfolio."""
+        if trade.mode != "paper":
+            return trade
+
+        try:
+            risk_pct = float(trade.risk_percent or trade.metadata.get("risk_percent") or 0.0)
+            current_risk = float(trade.risk_amount or 0.0)
+        except (TypeError, ValueError):
+            return trade
+        if risk_pct <= 0 or current_risk <= 0:
+            return trade
+
+        paper_account = getattr(self, "_paper_account", None)
+        if paper_account is None:
+            return trade
+        acct = await paper_account.get_account(trade.user_id)
+        if not acct:
+            return trade
+
+        try:
+            balance = float(acct.get("balance") or acct.get("starting_balance") or 0.0)
+        except (TypeError, ValueError):
+            return trade
+        if balance <= 0:
+            return trade
+
+        expected_risk = balance * risk_pct / 100.0
+        if expected_risk <= 0 or current_risk <= expected_risk * 1.05:
+            return trade
+
+        expected_reward = (
+            expected_risk * trade.risk_reward_ratio
+            if trade.risk_reward_ratio and trade.risk_reward_ratio > 0
+            else trade.expected_reward
+        )
+        metadata = {
+            **trade.metadata,
+            "risk_amount_repaired": True,
+            "original_risk_amount": current_risk,
+            "repaired_risk_amount": expected_risk,
+            "risk_repair_balance": balance,
+            "risk_repair_reason": "paper_wallet_risk_percent",
+        }
+        await self._lifecycle_repo.update_trade(
+            trade.id,
+            TradeUpdateLifecycle(
+                risk_amount=expected_risk,
+                expected_reward=expected_reward,
+                metadata=metadata,
+            ),
+        )
+        await self._event_repo.create(TradeEventInsert(
+            trade_id=trade.id,
+            bot_id=trade.bot_id,
+            user_id=trade.user_id,
+            event_type="risk_amount_repaired",
+            details={
+                "old_risk_amount": current_risk,
+                "new_risk_amount": expected_risk,
+                "risk_percent": risk_pct,
+                "balance": balance,
+            },
+        ))
+        return trade.model_copy(update={
+            "risk_amount": expected_risk,
+            "expected_reward": expected_reward,
+            "metadata": metadata,
+        })
 
     async def _run_reconciliation(
         self,
@@ -981,6 +1080,7 @@ class LifecycleEngine:
         old_plan = action.metadata.get("reward_plan") or trade.metadata.get("reward_plan") or {}
         new_plan = mark_level_hit(old_plan, level_no, qty=close_qty, pnl=realized_pnl, hit_at=hit_at)
         new_stop = next_stop_after_tp(trade, new_plan, level_no)
+        next_take_profit = next_take_profit_after_tp(new_plan, level_no)
         cumulative_realized = float(trade.realized_pnl or 0.0) + realized_pnl
         original_qty = _original_quantity(trade)
         reserved_total = (
@@ -1020,6 +1120,7 @@ class LifecycleEngine:
                 realized_pnl=cumulative_realized,
                 unrealized_pnl=calculate_unrealized_pnl(remaining_trade, close_price),
                 stop_loss=new_stop,
+                take_profit=next_take_profit,
                 metadata=metadata,
             ),
         )
@@ -1059,6 +1160,7 @@ class LifecycleEngine:
                 "realized_pnl": realized_pnl,
                 "cumulative_realized_pnl": cumulative_realized,
                 "new_stop_loss": new_stop,
+                "next_take_profit": next_take_profit,
                 "reward_plan": new_plan,
                 "reason": action.reason,
             },

@@ -82,6 +82,18 @@ class TestStopLossShort:
         action = check_stop_loss(trade, current_price=53_000.0)
         assert action.action_type == ActionType.CLOSE_STOP_LOSS
 
+    def test_triggers_when_candle_high_crosses_stop(self):
+        trade = self._trade(stop_loss=52_000.0)
+        action = check_stop_loss(
+            trade,
+            current_price=51_900.0,
+            high_price=52_100.0,
+            low_price=51_800.0,
+        )
+        assert action.action_type == ActionType.CLOSE_STOP_LOSS
+        assert action.close_price == pytest.approx(52_000.0)
+        assert action.metadata["trigger_source"] == "candle_range"
+
     def test_does_not_trigger_when_price_below_stop(self):
         trade = self._trade(stop_loss=52_000.0)
         action = check_stop_loss(trade, current_price=51_000.0)

@@ -212,11 +212,22 @@ class LiveExecutor:
             exchange_order_id=result.order_id,
             filled_quantity=filled_qty,
             avg_fill_price=fill_price,
+            unrealized_pnl=0.0,
+            realized_pnl=0.0,
+            pnl=0.0,
+            pnl_pct=0.0,
+            risk_amount=decision.risk_summary.get("risk_amount"),
+            risk_percent=decision.risk_summary.get("risk_percent"),
+            risk_reward_ratio=decision.risk_summary.get("risk_reward_ratio"),
+            expected_reward=decision.risk_summary.get("expected_reward"),
+            notional=decision.risk_summary.get("notional"),
             metadata={
                 "client_order_id": order.client_order_id,
                 "exchange_status": result.status,
                 "raw_response_status": result.raw_response.get("status"),
                 "market_snapshot_id": market_snapshot.id if market_snapshot else None,
+                "reward_plan": decision.risk_summary.get("reward_plan") or {},
+                "tp_plan": decision.risk_summary.get("tp_plan") or [],
             },
         )
 

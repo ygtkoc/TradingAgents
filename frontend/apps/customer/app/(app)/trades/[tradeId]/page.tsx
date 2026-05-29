@@ -2,23 +2,30 @@
 
 import {
   Badge,
+  Button,
   Card, CardContent, CardDescription, CardHeader, CardTitle,
+  Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle,
   EmptyState,
   ErrorState,
+  Input,
+  Label,
   LifecycleBadge,
   ModeBadge,
   PageHeader,
+  ProductPage,
   Skeleton,
   StatusBadge,
 } from "@ta/ui";
 import { cn, formatCurrency, formatDateTime, formatNumber } from "@ta/utils";
 import {
   AlertTriangle, ArrowDown, ArrowUp, BarChart2, Brain, Clock,
-  ShieldAlert, Target, Zap,
+  CircleDollarSign, Minus, Plus, ShieldAlert, ShieldCheck,
+  Target, TrendingDown, TrendingUp, XCircle, Zap,
 } from "lucide-react";
 import type { Trade } from "@ta/types";
-import { useQuery } from "@tanstack/react-query";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useParams } from "next/navigation";
+import { useState, type ComponentType } from "react";
 
 import { TradeTimeline } from "@/components/trades/trade-timeline";
 import { formatPrice } from "@/lib/format-price";
@@ -41,13 +48,13 @@ export default function TradeDetailPage() {
 
   if (isLoading || !trade) {
     return (
-      <div className="mx-auto flex max-w-6xl flex-col gap-5">
+      <ProductPage size="xl">
         <Skeleton className="h-9 w-64 rounded-xl" />
         <Skeleton className="h-52 w-full rounded-2xl" />
         <div className="grid gap-4 sm:grid-cols-3">
           {[...Array(6)].map((_, i) => <Skeleton key={i} className="h-20 rounded-xl" />)}
         </div>
-      </div>
+      </ProductPage>
     );
   }
 
@@ -71,9 +78,10 @@ export default function TradeDetailPage() {
       : "border-border/50 bg-card/80";
 
   return (
-    <div className="mx-auto flex max-w-6xl flex-col gap-5">
+    <ProductPage size="xl">
       {/* ── Header ─────────────────────────────────────────────────────────── */}
       <PageHeader
+        eyebrow="Position detail"
         title={`${trade.symbol} · ${trade.direction.toUpperCase()}`}
         description={`Created ${formatDateTime(trade.created_at)}`}
         actions={
@@ -103,6 +111,7 @@ export default function TradeDetailPage() {
 
       {/* ── P&L hero ─────────────────────────────────────────────────────────── */}
       <TradeStatePanel trade={trade} isOpen={isOpenLike} latestPrice={latestPrice} pnl={pnlNum} pnlPct={pnlPct} />
+      <ManualTradeControls trade={trade} latestPrice={latestPrice} onChanged={() => void refetch()} />
       <CloseExplanation trade={trade} latestPrice={latestPrice} />
 
       <div className={cn(
@@ -291,7 +300,7 @@ export default function TradeDetailPage() {
           emptyTitle="No security logs"
         />
       </div>
-    </div>
+    </ProductPage>
   );
 }
 
@@ -422,6 +431,295 @@ function StateTile({
       <div className="text-[9px] font-semibold uppercase tracking-[0.12em] text-muted-foreground/60">{label}</div>
       <div className={cn("mt-1 text-[14px] font-semibold text-foreground", className)}>{value}</div>
       <div className="mt-0.5 text-[11px] text-muted-foreground">{detail}</div>
+    </div>
+  );
+}
+
+type ManualAction =
+  | "buy"
+  | "sell"
+  | "add_quantity"
+  | "reduce_quantity"
+  | "close_percent"
+  | "close_full"
+  | "set_stop_loss"
+  | "set_take_profit"
+  | "move_stop_to_entry";
+
+interface ManualActionConfig {
+  action: ManualAction;
+  label: string;
+  icon: ComponentType<{ className?: string }>;
+  tone?: "default" | "destructive" | "outline" | "secondary";
+  quantity?: boolean;
+  percent?: boolean;
+  price?: boolean;
+  stop?: boolean;
+  takeProfit?: boolean;
+  liveAllowed?: boolean;
+}
+
+const manualActions: ManualActionConfig[] = [
+  { action: "buy", label: "Buy", icon: TrendingUp, quantity: true, price: true, liveAllowed: false },
+  { action: "sell", label: "Sell", icon: TrendingDown, quantity: true, price: true, tone: "destructive", liveAllowed: false },
+  { action: "add_quantity", label: "Add", icon: Plus, quantity: true, price: true, liveAllowed: false },
+  { action: "reduce_quantity", label: "Reduce", icon: Minus, quantity: true, price: true, tone: "outline", liveAllowed: false },
+  { action: "close_percent", label: "Close %", icon: XCircle, percent: true, price: true, tone: "destructive", liveAllowed: false },
+  { action: "close_full", label: "Close", icon: XCircle, price: true, tone: "destructive", liveAllowed: false },
+  { action: "set_stop_loss", label: "Stop", icon: ShieldAlert, stop: true, tone: "outline", liveAllowed: true },
+  { action: "set_take_profit", label: "Take profit", icon: Target, takeProfit: true, tone: "outline", liveAllowed: true },
+  { action: "move_stop_to_entry", label: "BE stop", icon: ShieldCheck, tone: "secondary", liveAllowed: true },
+];
+
+function ManualTradeControls({
+  trade,
+  latestPrice,
+  onChanged,
+}: {
+  trade: Trade;
+  latestPrice: number | null;
+  onChanged: () => void;
+}) {
+  const queryClient = useQueryClient();
+  const isOpen = trade.status === "open" && trade.lifecycle_status !== "closed";
+  const isLive = trade.mode === "live";
+  const qty = toNum(trade.filled_quantity) ?? toNum(trade.quantity) ?? 0;
+  const entry = toNum(trade.avg_fill_price ?? trade.avg_entry_price ?? trade.entry_price);
+  const defaultPrice = latestPrice ?? entry ?? 0;
+  const [active, setActive] = useState<ManualActionConfig | null>(null);
+  const [quantity, setQuantity] = useState(qty > 0 ? formatInput(qty * 0.25) : "");
+  const [percent, setPercent] = useState("50");
+  const [price, setPrice] = useState(defaultPrice > 0 ? formatInput(defaultPrice) : "");
+  const [stopLoss, setStopLoss] = useState(trade.stop_loss != null ? formatInput(Number(trade.stop_loss)) : "");
+  const [takeProfit, setTakeProfit] = useState(trade.take_profit != null ? formatInput(Number(trade.take_profit)) : "");
+  const [error, setError] = useState<string | null>(null);
+
+  const mutation = useMutation({
+    mutationFn: async (payload: {
+      action: ManualAction;
+      quantity?: number | null;
+      percent?: number | null;
+      price?: number | null;
+      stopLoss?: number | null;
+      takeProfit?: number | null;
+    }) => {
+      const { data, error: rpcError } = await (supabase as any).rpc("manual_trade_action", {
+        p_trade_id: trade.id,
+        p_action: payload.action,
+        p_quantity: payload.quantity ?? null,
+        p_percent: payload.percent ?? null,
+        p_price: payload.price ?? null,
+        p_stop_loss: payload.stopLoss ?? null,
+        p_take_profit: payload.takeProfit ?? null,
+      });
+      if (rpcError) throw new Error(formatManualActionError(rpcError.message));
+      return data;
+    },
+    onSuccess: async () => {
+      setError(null);
+      setActive(null);
+      await queryClient.invalidateQueries({ queryKey: ["trades"] });
+      await queryClient.invalidateQueries({ queryKey: ["trade-events"] });
+      onChanged();
+    },
+    onError: (err) => setError((err as Error).message),
+  });
+
+  function openDialog(config: ManualActionConfig) {
+    setActive(config);
+    setQuantity(qty > 0 ? formatInput(config.action === "close_full" ? qty : qty * 0.25) : "");
+    setPercent(config.action === "close_full" ? "100" : "50");
+    setPrice(defaultPrice > 0 ? formatInput(defaultPrice) : "");
+    setStopLoss(trade.stop_loss != null ? formatInput(Number(trade.stop_loss)) : "");
+    setTakeProfit(trade.take_profit != null ? formatInput(Number(trade.take_profit)) : "");
+    setError(null);
+  }
+
+  function submit(config: ManualActionConfig) {
+    const parsedQuantity = parseInput(quantity);
+    const parsedPercent = parseInput(percent);
+    const parsedPrice = parseInput(price);
+    const parsedStop = parseInput(stopLoss);
+    const parsedTakeProfit = parseInput(takeProfit);
+
+    if (config.quantity && (!parsedQuantity || parsedQuantity <= 0)) {
+      setError("Quantity is required.");
+      return;
+    }
+    if (config.percent && (!parsedPercent || parsedPercent <= 0)) {
+      setError("Percent is required.");
+      return;
+    }
+    if (config.price && (!parsedPrice || parsedPrice <= 0)) {
+      setError("Price is required.");
+      return;
+    }
+    if (config.stop && (!parsedStop || parsedStop <= 0)) {
+      setError("Stop price is required.");
+      return;
+    }
+    if (config.takeProfit && (!parsedTakeProfit || parsedTakeProfit <= 0)) {
+      setError("Take-profit price is required.");
+      return;
+    }
+
+    mutation.mutate({
+      action: config.action,
+      quantity: config.quantity ? parsedQuantity : null,
+      percent: config.percent ? parsedPercent : config.action === "close_full" ? 100 : null,
+      price: config.price ? parsedPrice : null,
+      stopLoss: config.stop ? parsedStop : null,
+      takeProfit: config.takeProfit ? parsedTakeProfit : null,
+    });
+  }
+
+  const protectiveActions = manualActions.filter((action) => action.liveAllowed);
+  const tradeActions = manualActions.filter((action) => !action.liveAllowed);
+
+  return (
+    <Card>
+      <CardHeader>
+        <div className="flex flex-wrap items-center justify-between gap-3">
+          <div className="flex items-center gap-2">
+            <CircleDollarSign className="h-4 w-4 text-muted-foreground/50" />
+            <CardTitle>Manual trade terminal</CardTitle>
+          </div>
+          <Badge variant={isOpen ? "success" : "secondary"} className="text-[10px]">
+            {isOpen ? "active" : "inactive"}
+          </Badge>
+        </div>
+        <CardDescription>Direct position controls for paper and shadow positions.</CardDescription>
+      </CardHeader>
+      <CardContent className="space-y-4">
+        {isLive ? (
+          <div className="rounded-xl border border-warning/30 bg-warning/8 px-4 py-3 text-[12px] text-warning">
+            Live exchange order buttons are locked here. Protective levels can be edited; market orders must run through the audited execution service.
+          </div>
+        ) : null}
+        <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-5">
+          {tradeActions.map((config) => {
+            const Icon = config.icon;
+            const disabled = !isOpen || (isLive && !config.liveAllowed);
+            return (
+              <Button
+                key={config.action}
+                type="button"
+                variant={config.tone ?? "default"}
+                className="h-10 justify-start gap-2"
+                disabled={disabled}
+                onClick={() => openDialog(config)}
+                title={disabled && isLive ? "Live market orders are handled by the execution service." : config.label}
+              >
+                <Icon className="h-4 w-4" />
+                {config.label}
+              </Button>
+            );
+          })}
+        </div>
+        <div className="grid gap-2 sm:grid-cols-3">
+          {protectiveActions.map((config) => {
+            const Icon = config.icon;
+            return (
+              <Button
+                key={config.action}
+                type="button"
+                variant={config.tone ?? "outline"}
+                className="h-10 justify-start gap-2"
+                disabled={!isOpen || mutation.isPending}
+                onClick={() => {
+                  if (config.action === "move_stop_to_entry") {
+                    mutation.mutate({ action: config.action });
+                  } else {
+                    openDialog(config);
+                  }
+                }}
+              >
+                <Icon className="h-4 w-4" />
+                {config.label}
+              </Button>
+            );
+          })}
+        </div>
+      </CardContent>
+
+      <Dialog open={active != null} onOpenChange={(open) => !open && setActive(null)}>
+        <DialogContent>
+          {active ? (
+            <>
+              <DialogHeader>
+                <DialogTitle>{active.label}</DialogTitle>
+                <DialogDescription>{trade.symbol} · {trade.direction.toUpperCase()}</DialogDescription>
+              </DialogHeader>
+              <div className="grid gap-3">
+                {active.quantity ? (
+                  <Field label="Quantity" value={quantity} onChange={setQuantity} />
+                ) : null}
+                {active.percent ? (
+                  <Field label="Percent" value={percent} onChange={setPercent} suffix="%" />
+                ) : null}
+                {active.price ? (
+                  <Field label="Price" value={price} onChange={setPrice} />
+                ) : null}
+                {active.stop ? (
+                  <Field label="Stop loss" value={stopLoss} onChange={setStopLoss} />
+                ) : null}
+                {active.takeProfit ? (
+                  <Field label="Take profit" value={takeProfit} onChange={setTakeProfit} />
+                ) : null}
+                {error ? (
+                  <div className="rounded-lg border border-destructive/30 bg-destructive/8 px-3 py-2 text-[12px] text-destructive">
+                    {error}
+                  </div>
+                ) : null}
+              </div>
+              <DialogFooter>
+                <Button type="button" variant="ghost" onClick={() => setActive(null)}>
+                  Cancel
+                </Button>
+                <Button
+                  type="button"
+                  variant={active.tone === "destructive" ? "destructive" : "default"}
+                  disabled={mutation.isPending}
+                  onClick={() => submit(active)}
+                >
+                  {mutation.isPending ? "Working..." : "Execute"}
+                </Button>
+              </DialogFooter>
+            </>
+          ) : null}
+        </DialogContent>
+      </Dialog>
+    </Card>
+  );
+}
+
+function Field({
+  label,
+  value,
+  onChange,
+  suffix,
+}: {
+  label: string;
+  value: string;
+  onChange: (value: string) => void;
+  suffix?: string;
+}) {
+  return (
+    <div className="space-y-1.5">
+      <Label className="text-[11px] uppercase tracking-[0.12em] text-muted-foreground/60">{label}</Label>
+      <div className="relative">
+        <Input
+          inputMode="decimal"
+          value={value}
+          onChange={(event) => onChange(event.target.value)}
+          className={suffix ? "pr-10" : undefined}
+        />
+        {suffix ? (
+          <span className="pointer-events-none absolute right-3 top-1/2 -translate-y-1/2 text-[12px] text-muted-foreground/60">
+            {suffix}
+          </span>
+        ) : null}
+      </div>
     </div>
   );
 }
@@ -828,6 +1126,25 @@ function normalizePct(value: number | null): number | null {
 function toNum(value: unknown): number | null {
   const n = Number(value);
   return Number.isFinite(n) ? n : null;
+}
+
+function parseInput(value: string): number | null {
+  const normalized = value.trim().replace(",", ".");
+  if (!normalized) return null;
+  const n = Number(normalized);
+  return Number.isFinite(n) ? n : null;
+}
+
+function formatInput(value: number): string {
+  if (!Number.isFinite(value)) return "";
+  return String(Number(value.toFixed(8)));
+}
+
+function formatManualActionError(message: string): string {
+  if (message.includes("manual_trade_action") && message.includes("schema cache")) {
+    return "Manual trade action RPC is not deployed yet. Apply supabase/migrations/0031_manual_trade_actions.sql to the connected Supabase project, then reload the page.";
+  }
+  return message;
 }
 
 interface LogItem {

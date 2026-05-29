@@ -7,34 +7,34 @@ import { cn } from "@ta/utils";
 
 const buttonVariants = cva(
   [
-    "inline-flex items-center justify-center whitespace-nowrap rounded-lg",
+    "inline-flex items-center justify-center whitespace-nowrap rounded-md",
     "text-[13px] font-semibold tracking-[0.01em]",
     "ring-offset-background transition-all duration-150",
     "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2",
     "disabled:pointer-events-none disabled:opacity-40",
-    "active:scale-[0.97]",
+    "active:scale-[0.98]",
   ].join(" "),
   {
     variants: {
       variant: {
         default: [
           "bg-primary text-primary-foreground",
-          "shadow-[0_1px_3px_rgba(0,0,0,0.4),inset_0_1px_0_rgba(255,255,255,0.08)]",
-          "hover:bg-primary/90 hover:shadow-[0_0_12px_hsl(var(--primary)/0.35)]",
+          "shadow-[0_10px_26px_hsl(var(--primary)/0.18),inset_0_1px_0_rgba(255,255,255,0.18)]",
+          "hover:bg-primary/92 hover:shadow-[0_12px_34px_hsl(var(--primary)/0.26)]",
         ].join(" "),
         destructive: [
           "bg-destructive/90 text-destructive-foreground",
           "hover:bg-destructive hover:shadow-[0_0_12px_hsl(var(--destructive)/0.3)]",
         ].join(" "),
         outline: [
-          "border border-border/80 bg-transparent text-foreground",
-          "hover:bg-white/[0.04] hover:border-border",
+          "border border-border/80 bg-card/45 text-foreground shadow-[inset_0_1px_0_rgba(255,255,255,0.04)]",
+          "hover:bg-white/[0.055] hover:border-border",
         ].join(" "),
         secondary: [
           "bg-secondary text-secondary-foreground",
           "hover:bg-secondary/70",
         ].join(" "),
-        ghost: "text-muted-foreground hover:bg-white/[0.05] hover:text-foreground",
+        ghost: "text-muted-foreground hover:bg-white/[0.055] hover:text-foreground",
         link:  "text-primary underline-offset-4 hover:underline p-0 h-auto",
       },
       size: {

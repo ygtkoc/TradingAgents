@@ -103,6 +103,7 @@ class Trade(BaseModel):
     avg_exit_price:           Optional[float] = None
     pnl_pct:                  Optional[float] = None
     risk_amount:              Optional[float] = None
+    risk_percent:             Optional[float] = None
     risk_reward_ratio:        Optional[float] = None
     r_multiple:               Optional[float] = None
     expected_reward:          Optional[float] = None
@@ -154,6 +155,7 @@ class Bot(BaseModel):
 
     # Trailing stop configuration (stored in bot config or metadata)
     trailing_stop_pct:        Optional[float] = None
+    metadata:                 dict[str, Any] = Field(default_factory=dict)
 
 
 class UserSettings(BaseModel):
@@ -260,6 +262,9 @@ class TradeUpdateLifecycle(BaseModel):
     pnl:                       Optional[float] = None
     pnl_pct:                   Optional[float] = None
     r_multiple:                Optional[float] = None
+    risk_amount:               Optional[float] = None
+    risk_percent:              Optional[float] = None
+    expected_reward:           Optional[float] = None
     filled_quantity:           Optional[float] = None  # reconciliation partial-fill update
     avg_fill_price:            Optional[float] = None
     avg_entry_price:           Optional[float] = None

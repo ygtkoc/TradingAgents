@@ -2,7 +2,7 @@
 
 import {
   Badge, Button, Card, CardContent, CardDescription, CardHeader, CardTitle,
-  EmptyState, ErrorState, PageHeader, Skeleton,
+  EmptyState, ErrorState, PageHeader, ProductPage, Skeleton,
 } from "@ta/ui";
 import { cn, formatCurrency, formatDateTime, formatRelative } from "@ta/utils";
 import {
@@ -210,36 +210,36 @@ export default function DecisionDetailPage() {
 
   if (decisionQ.isLoading) {
     return (
-      <div className="mx-auto flex max-w-5xl flex-col gap-5">
+      <ProductPage size="lg">
         <Skeleton className="h-9 w-72 rounded-xl" />
         <Skeleton className="h-40 w-full rounded-2xl" />
         <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
           {[...Array(5)].map((_, i) => <Skeleton key={i} className="h-44 rounded-xl" />)}
         </div>
-      </div>
+      </ProductPage>
     );
   }
 
   if (decisionQ.isError) {
     return (
-      <div className="mx-auto max-w-3xl">
+      <ProductPage size="md">
         <ErrorState
           title="Could not load decision"
           message={String((decisionQ.error as Error)?.message ?? "")}
           onRetry={() => void decisionQ.refetch()}
         />
-      </div>
+      </ProductPage>
     );
   }
 
   if (!decision) {
     return (
-      <div className="mx-auto max-w-3xl">
+      <ProductPage size="md">
         <EmptyState
           title="Decision not found"
           description={`No record for id ${decisionId}`}
         />
-      </div>
+      </ProductPage>
     );
   }
 
@@ -266,9 +266,10 @@ export default function DecisionDetailPage() {
   const outcomeIconColor = isWarmingUp ? "text-warning" : isReject ? "text-destructive" : "text-success";
 
   return (
-    <div className="mx-auto flex max-w-5xl flex-col gap-5">
+    <ProductPage size="lg">
       {/* ── Header ─────────────────────────────────────────────────────────── */}
       <PageHeader
+        eyebrow="Decision detail"
         title={`${decision.symbol} · ${decision.final_decision.replace(/_/g, " ")}`}
         description={`Decision recorded ${formatDateTime(decision.created_at)}`}
         actions={
@@ -501,7 +502,7 @@ export default function DecisionDetailPage() {
       {/* ── Raw JSON (collapsible) ───────────────────────────────────────────── */}
       <CollapsibleJson title="Raw decision row" data={decision} />
       {primaryRun ? <CollapsibleJson title="Raw agent run" data={primaryRun} /> : null}
-    </div>
+    </ProductPage>
   );
 }
 

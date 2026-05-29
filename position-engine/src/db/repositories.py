@@ -61,6 +61,7 @@ def _is_transient_lifecycle_error(error: object) -> bool:
         "network",
         "http/2",
         "httpx",
+        "max retries exceeded",
     )
     return any(marker in text for marker in transient_markers)
 
@@ -102,7 +103,11 @@ class TradeLifecycleRepository:
         result = await _run(_select)
         return [r["id"] for r in (result.data or [])]
 
-    async def release_stale_claims(self, max_age_minutes: int) -> int:
+    async def release_stale_claims(
+        self,
+        max_age_minutes: int | None = None,
+        max_age_seconds: int | None = None,
+    ) -> int:
         """
         Release lifecycle claims left behind by a dead worker.
 
@@ -113,7 +118,13 @@ class TradeLifecycleRepository:
         if settings.dry_run:
             return 0
 
-        cutoff = (utcnow() - timedelta(minutes=max_age_minutes)).isoformat()
+        if max_age_seconds is not None:
+            cutoff = (utcnow() - timedelta(seconds=max_age_seconds)).isoformat()
+            age_label = f"{max_age_seconds}s"
+        else:
+            max_age_minutes = max_age_minutes if max_age_minutes is not None else 10
+            cutoff = (utcnow() - timedelta(minutes=max_age_minutes)).isoformat()
+            age_label = f"{max_age_minutes}m"
 
         def _release_monitoring():
             return (
@@ -157,7 +168,7 @@ class TradeLifecycleRepository:
             log.warning(
                 "lifecycle.stale_claims_released",
                 count=released,
-                max_age_minutes=max_age_minutes,
+                max_age=age_label,
             )
         return released
 

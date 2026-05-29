@@ -185,6 +185,72 @@ class TestOrderConfirmation:
         trade = _execute(executor, adapter)
         executor._trade_repo.create.assert_awaited_once()
 
+    def test_live_trade_persists_reward_plan_for_lifecycle(self):
+        executor = _make_executor()
+        adapter = _make_adapter()
+        plan = {
+            "mode": "scaled_take_profit",
+            "selected_reward_r": 3.0,
+            "levels": [
+                {"level": 1, "price": 51000.0, "close_pct": 0.30, "status": "pending"},
+                {"level": 2, "price": 52000.0, "close_pct": 0.40, "status": "pending"},
+                {"level": 3, "price": 53000.0, "close_pct": 0.30, "status": "pending"},
+            ],
+        }
+        decision = make_decision(
+            mode="live",
+            risk_summary={
+                "entry_price": 50000.0,
+                "quantity": 0.01,
+                "stop_loss": 49000.0,
+                "take_profit": 53000.0,
+                "risk_amount": 10.0,
+                "risk_percent": 1.0,
+                "risk_reward_ratio": 3.0,
+                "expected_reward": 30.0,
+                "notional": 500.0,
+                "reward_plan": plan,
+                "tp_plan": plan["levels"],
+            },
+        )
+        bot = make_bot(real_trading_enabled=True)
+        account = make_exchange_account(can_withdraw=False, can_trade=True)
+        snap = make_market_snapshot()
+
+        from src.exchanges.base import OrderRequest
+        order = OrderRequest(
+            exchange="binance",
+            symbol="BTC/USDT",
+            side="buy",
+            order_type="market",
+            quantity=0.01,
+            stop_loss=49000.0,
+            take_profit=53000.0,
+            client_order_id="test-coid-001",
+        )
+
+        executor._key_provider.get_credentials = AsyncMock(return_value=_make_credentials())
+        executor._trade_repo.create = AsyncMock(return_value=make_trade())
+
+        with patch("src.execution.live_executor.get_live_adapter", return_value=adapter), \
+             patch("src.execution.live_executor.settings") as mock_settings:
+            mock_settings.enable_live_execution = True
+            mock_settings.max_slippage_pct = 1.0
+            run(executor.execute(
+                decision=decision,
+                bot=bot,
+                exchange_account=account,
+                order=order,
+                entry_price=50000.0,
+                market_snapshot=snap,
+            ))
+
+        inserted = executor._trade_repo.create.await_args.args[0]
+        assert inserted.risk_amount == 10.0
+        assert inserted.risk_reward_ratio == 3.0
+        assert inserted.metadata["reward_plan"] == plan
+        assert inserted.metadata["tp_plan"] == plan["levels"]
+
     def test_rejected_order_raises_and_no_trade(self):
         """fetch_order returns 'rejected' → LiveExecutionError, no trade created."""
         executor = _make_executor()

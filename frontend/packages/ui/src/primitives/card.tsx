@@ -7,9 +7,8 @@ export const Card = forwardRef<HTMLDivElement, HTMLAttributes<HTMLDivElement>>(
     <div
       ref={ref}
       className={cn(
-        "rounded-xl border border-border/50 bg-card/80 text-card-foreground",
-        "shadow-[0_1px_3px_rgba(0,0,0,0.4),0_1px_2px_rgba(0,0,0,0.3)]",
-        "backdrop-blur-sm",
+        "surface-panel rounded-lg text-card-foreground",
+        "transition-all duration-200 hover:border-border/80",
         className,
       )}
       {...props}
@@ -20,7 +19,7 @@ Card.displayName = "Card";
 
 export const CardHeader = forwardRef<HTMLDivElement, HTMLAttributes<HTMLDivElement>>(
   ({ className, ...props }, ref) => (
-    <div ref={ref} className={cn("flex flex-col space-y-1 p-5", className)} {...props} />
+    <div ref={ref} className={cn("flex flex-col space-y-1.5 p-5", className)} {...props} />
   ),
 );
 CardHeader.displayName = "CardHeader";
@@ -29,7 +28,7 @@ export const CardTitle = forwardRef<HTMLDivElement, HTMLAttributes<HTMLDivElemen
   ({ className, ...props }, ref) => (
     <div
       ref={ref}
-      className={cn("text-[15px] font-semibold leading-snug tracking-tight text-foreground", className)}
+      className={cn("text-[15px] font-semibold leading-snug tracking-[0] text-foreground", className)}
       {...props}
     />
   ),

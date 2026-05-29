@@ -2,7 +2,7 @@
 
 import {
   Badge, Button, Card, CardContent, CardDescription, CardHeader, CardTitle,
-  EmptyState, KpiCard, PageHeader, Skeleton,
+  EmptyState, IntelligenceCard, KpiCard, PageHeader, PipelineRail, ProductPage, Skeleton,
 } from "@ta/ui";
 import { DailyPnLChart, EquityCurve, type DailyPnLPoint, type EquityPoint } from "@ta/ui/charts";
 import { cn, formatCurrency, formatRelative } from "@ta/utils";
@@ -69,17 +69,16 @@ export default function DashboardPage() {
   // ── Onboarding ─────────────────────────────────────────────────────────────
   if (!acct.isLoading && !acct.data) {
     return (
-      <div className="mx-auto flex max-w-3xl flex-col gap-6">
+      <ProductPage size="md">
         <PageHeader
-          title="Welcome to lucrandos"
-          description="Run a multi-agent AI trading simulation against live Binance market data."
+          eyebrow="Activation"
+          title="Initialize your AI trading OS"
+          description="Run a multi-agent trading simulation against live Binance market data with safety gates, audit trails, and autonomous decisions."
         />
 
         {/* Hero CTA */}
         <div className="relative overflow-hidden rounded-2xl border border-primary/20 bg-gradient-to-br from-primary/8 via-card to-card p-8">
-          {/* Glow backdrop */}
-          <div className="pointer-events-none absolute -right-20 -top-20 h-64 w-64 rounded-full bg-primary/10 blur-3xl" />
-          <div className="pointer-events-none absolute -bottom-10 -left-10 h-48 w-48 rounded-full bg-primary/5 blur-2xl" />
+          <div className="pointer-events-none absolute inset-x-0 top-0 h-px bg-gradient-to-r from-primary/60 via-cyan-300/35 to-transparent" />
 
           <div className="relative flex flex-col gap-6 md:flex-row md:items-center">
             <div className="flex-1 space-y-3">
@@ -153,7 +152,7 @@ export default function DashboardPage() {
             </Card>
           ))}
         </div>
-      </div>
+      </ProductPage>
     );
   }
 
@@ -176,11 +175,12 @@ export default function DashboardPage() {
   const acctStatus  = a?.status ?? "inactive";
 
   return (
-    <div className="mx-auto flex max-w-6xl flex-col gap-5">
+      <ProductPage size="xl">
       {/* ── Header ─────────────────────────────────────────────────────────── */}
       <PageHeader
-        title="Dashboard"
-        description="Live overview of your paper account, bots, and agent decisions."
+          eyebrow="Command center"
+          title="AI trading infrastructure"
+          description="Live operating view for market intelligence, agent consensus, execution gates, portfolio health, and paper-trading state."
         actions={
           <div className="flex flex-wrap items-center gap-2">
             <Badge
@@ -207,6 +207,22 @@ export default function DashboardPage() {
             </Link>
           </div>
         }
+      />
+
+      <div className="grid gap-3 md:grid-cols-4">
+        <IntelligenceCard title="Market pulse" value={acctStatus} label="paper engine lifecycle" tone={acctStatus === "active" ? "emerald" : "neutral"} />
+        <IntelligenceCard title="Agent quorum" value={(bots.data ?? []).filter((b) => !b.is_archived).length} label="configured autonomous agents" tone="cyan" />
+        <IntelligenceCard title="Pending review" value={pending.data?.length ?? 0} label="decisions awaiting approval" tone={(pending.data?.length ?? 0) > 0 ? "amber" : "emerald"} />
+        <IntelligenceCard title="Exchange readiness" value={(conns.data ?? []).length} label="connected execution venues" tone="purple" />
+      </div>
+
+      <PipelineRail
+        steps={[
+          { label: "Signal intake", state: "complete" },
+          { label: "Agent debate", state: acctStatus === "active" ? "active" : "idle" },
+          { label: "Risk guard", state: "complete" },
+          { label: "Execution engine", state: openCount > 0 ? "active" : "idle" },
+        ]}
       />
 
       {/* ── KPI strip ───────────────────────────────────────────────────────── */}
@@ -397,6 +413,6 @@ export default function DashboardPage() {
           </CardHeader>
         </Card>
       ) : null}
-    </div>
+    </ProductPage>
   );
 }

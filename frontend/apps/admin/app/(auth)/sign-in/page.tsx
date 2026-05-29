@@ -4,13 +4,14 @@ export default function AdminSignInPage() {
   return (
     <Card className="w-full max-w-sm">
       <CardHeader>
-        <CardTitle>Admin sign in</CardTitle>
+        <CardTitle>Admin access</CardTitle>
         <CardDescription>
-          Auth UI lands in a later task. Non-admin authenticated users hit a 404
-          on every other admin route.
+          Operations access is restricted to authenticated admins. Non-admin accounts are denied from every admin route.
         </CardDescription>
       </CardHeader>
-      <CardContent className="text-sm text-muted-foreground">Placeholder.</CardContent>
+      <CardContent className="text-sm text-muted-foreground">
+        Authentication UI is intentionally minimal until the admin flow is wired to the production identity policy.
+      </CardContent>
     </Card>
   );
 }

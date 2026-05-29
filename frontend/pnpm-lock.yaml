@@ -11,6 +11,9 @@ importers:
       '@types/node':
         specifier: ^20.14.0
         version: 20.19.39
+      eslint:
+        specifier: ^8.57.1
+        version: 8.57.1
       prettier:
         specifier: ^3.3.3
         version: 3.8.3

@@ -2,7 +2,7 @@
 
 import {
   Badge, Button, Card, CardContent, CardDescription, CardHeader, CardTitle,
-  EmptyState, ErrorState, PageHeader, Skeleton,
+  EmptyState, ErrorState, PageHeader, ProductPage, Skeleton,
 } from "@ta/ui";
 import { cn, formatCurrency, formatDateTime, formatRelative } from "@ta/utils";
 import { ArrowDownRight, ArrowLeft, ArrowUpRight, ReceiptText } from "lucide-react";
@@ -46,8 +46,9 @@ export default function PaperLedgerDetailPage() {
   const total = rows.reduce((sum, row) => sum + row.movement.visibleDelta, 0);
 
   return (
-    <div className="mx-auto flex max-w-6xl flex-col gap-5">
+    <ProductPage size="xl">
       <PageHeader
+        eyebrow="Paper ledger"
         title={meta.title}
         description={meta.description}
         actions={
@@ -92,7 +93,7 @@ export default function PaperLedgerDetailPage() {
           )}
         </CardContent>
       </Card>
-    </div>
+    </ProductPage>
   );
 }
 

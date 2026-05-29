@@ -6,6 +6,7 @@ import {
   EmptyState,
   ErrorState,
   PageHeader,
+  ProductPage,
   Skeleton,
 } from "@ta/ui";
 import { cn, formatRelative } from "@ta/utils";
@@ -23,8 +24,9 @@ export default function NotificationsPage() {
   const unreadCount = (data ?? []).filter((n) => !n.read).length;
 
   return (
-    <div className="mx-auto flex max-w-3xl flex-col gap-5">
+    <ProductPage size="md">
       <PageHeader
+        eyebrow="Event stream"
         title="Notifications"
         description="Realtime updates from the Agent, Execution, and Position engines."
         actions={
@@ -132,6 +134,6 @@ export default function NotificationsPage() {
           )}
         </CardContent>
       </Card>
-    </div>
+    </ProductPage>
   );
 }
