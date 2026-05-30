@@ -116,3 +116,15 @@ class TestStopLossShort:
         trade = self._trade(stop_loss=52_000.0)
         action = check_stop_loss(trade, current_price=51_999.99)
         assert action.action_type == ActionType.HOLD
+
+
+class TestStopLossNeutralDirectionFallback:
+    def test_neutral_buy_uses_long_stop_rule(self):
+        trade = make_trade(direction="neutral", side="buy", entry_price=100.0, stop_loss=98.0)
+        action = check_stop_loss(trade, current_price=97.5)
+        assert action.action_type == ActionType.CLOSE_STOP_LOSS
+
+    def test_neutral_sell_uses_short_stop_rule(self):
+        trade = make_trade(direction="neutral", side="sell", entry_price=100.0, stop_loss=102.0)
+        action = check_stop_loss(trade, current_price=102.5)
+        assert action.action_type == ActionType.CLOSE_STOP_LOSS

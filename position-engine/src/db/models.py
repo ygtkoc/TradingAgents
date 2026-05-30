@@ -127,7 +127,11 @@ class Trade(BaseModel):
 
     @property
     def is_long(self) -> bool:
-        return self.direction == "long"
+        if self.direction == "long":
+            return True
+        if self.direction == "short":
+            return False
+        return self.side == "buy"
 
     @property
     def is_live(self) -> bool:

@@ -99,3 +99,15 @@ class TestTakeProfitShort:
         trade = self._trade(take_profit=40_000.0)
         action = check_take_profit(trade, current_price=40_000.01)
         assert action.action_type == ActionType.HOLD
+
+
+class TestTakeProfitNeutralDirectionFallback:
+    def test_neutral_buy_uses_long_take_profit_rule(self):
+        trade = make_trade(direction="neutral", side="buy", entry_price=100.0, take_profit=104.0)
+        action = check_take_profit(trade, current_price=104.5)
+        assert action.action_type == ActionType.CLOSE_TAKE_PROFIT
+
+    def test_neutral_sell_uses_short_take_profit_rule(self):
+        trade = make_trade(direction="neutral", side="sell", entry_price=100.0, take_profit=96.0)
+        action = check_take_profit(trade, current_price=95.5)
+        assert action.action_type == ActionType.CLOSE_TAKE_PROFIT
