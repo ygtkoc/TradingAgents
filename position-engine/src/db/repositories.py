@@ -41,8 +41,21 @@ log = get_logger(__name__)
 
 
 async def _run(fn, *args, **kwargs):
-    """Run a blocking supabase-py call off the event loop."""
-    return await asyncio.to_thread(fn, *args, **kwargs)
+    """Run a blocking supabase-py call off the event loop with transient retries."""
+    max_attempts = 3
+    for attempt in range(1, max_attempts + 1):
+        try:
+            return await asyncio.to_thread(fn, *args, **kwargs)
+        except Exception as exc:
+            if attempt >= max_attempts or not _is_transient_lifecycle_error(exc):
+                raise
+            log.warning(
+                "db.transient_call_retry",
+                attempt=attempt,
+                max_attempts=max_attempts,
+                error=str(exc)[:200],
+            )
+            await asyncio.sleep(0.2 * attempt)
 
 
 def _is_transient_lifecycle_error(error: object) -> bool:
@@ -519,6 +532,13 @@ class TradeLifecycleRepository:
     async def count_critical_security_events(
         self, user_id: str, within_hours: int = 24
     ) -> int:
+        """
+        Count unresolved critical security incidents for lifecycle safety checks.
+
+        Guard-generated audit rows must not recursively block paper/shadow
+        lifecycle monitoring. Those rows only say that a guard blocked an
+        action; they are not the underlying account/security incident.
+        """
         from datetime import timedelta
         from src.utils.time import utcnow
         cutoff = (utcnow() - timedelta(hours=within_hours)).isoformat()
@@ -529,6 +549,9 @@ class TradeLifecycleRepository:
                 .select("id", count="exact")
                 .eq("user_id", user_id)
                 .eq("severity", "critical")
+                .eq("resolved", False)
+                .neq("event_type", "security_guard_blocked_execution")
+                .neq("event_type", "live_close_blocked")
                 .gte("created_at", cutoff)
                 .execute()
             )
