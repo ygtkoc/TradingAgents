@@ -2,8 +2,18 @@ import Link from "next/link";
 
 import { buttonVariants, Card, CardContent, CardDescription, CardHeader, CardTitle } from "@ta/ui";
 
+function getCustomerSignInUrl() {
+  const configuredUrl = process.env.NEXT_PUBLIC_CUSTOMER_URL?.replace(/\/$/, "");
+  const customerUrl =
+    configuredUrl && !configuredUrl.includes("localhost")
+      ? configuredUrl
+      : "https://customer.lucrandos.com";
+
+  return `${customerUrl}/sign-in`;
+}
+
 export default function HomePage() {
-  const customerUrl = process.env.NEXT_PUBLIC_CUSTOMER_URL ?? "http://localhost:3001";
+  const customerSignInUrl = getCustomerSignInUrl();
 
   return (
     <main className="system-backdrop relative min-h-screen overflow-hidden px-6 py-8 text-foreground">
@@ -19,7 +29,7 @@ export default function HomePage() {
               <div className="text-[10px] font-semibold uppercase tracking-[0.16em] text-muted-foreground">AI trading OS</div>
             </div>
           </div>
-          <Link href={customerUrl} className={buttonVariants({ variant: "outline" })}>
+          <Link href={customerSignInUrl} className={buttonVariants({ variant: "outline" })}>
             Sign in
           </Link>
         </nav>
@@ -36,7 +46,7 @@ export default function HomePage() {
               Paper trade, shadow test, and live-gate execution with agent debate, signal scoring, position lifecycle management, and auditable safety controls.
             </p>
             <div className="flex flex-wrap gap-3">
-              <Link href={customerUrl} className={buttonVariants({ size: "lg" })}>
+              <Link href={customerSignInUrl} className={buttonVariants({ size: "lg" })}>
                 Open command center
               </Link>
               <Link href="/pricing" className={buttonVariants({ variant: "outline", size: "lg" })}>

@@ -13,7 +13,10 @@ import { supabase }   from "@/lib/supabase/client";
 function SignInForm() {
   const router       = useRouter();
   const searchParams = useSearchParams();
-  const next         = searchParams.get("next") || "/dashboard";
+  const requestedNext = searchParams.get("next");
+  const next          = requestedNext?.startsWith("/") && !requestedNext.startsWith("//")
+    ? requestedNext
+    : "/dashboard";
 
   const [email, setEmail]       = useState("");
   const [password, setPassword] = useState("");
@@ -26,8 +29,7 @@ function SignInForm() {
     setError(null);
 
     if (isDemoMode) {
-      router.push(next);
-      router.refresh();
+      window.location.assign(next);
       return;
     }
 
@@ -39,8 +41,7 @@ function SignInForm() {
       setError(err.message || "Could not sign in. Check your credentials.");
       return;
     }
-    router.push(next);
-    router.refresh();
+    window.location.assign(next);
   };
 
   return (
