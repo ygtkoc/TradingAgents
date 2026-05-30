@@ -1,0 +1,21 @@
+{
+  "expo": {
+    "name": "Lucrandos",
+    "slug": "lucrandos",
+    "version": "0.1.0",
+    "orientation": "portrait",
+    "userInterfaceStyle": "dark",
+    "scheme": "lucrandos",
+    "assetBundlePatterns": ["**/*"],
+    "ios": {
+      "supportsTablet": true,
+      "bundleIdentifier": "com.lucrandos.mobile"
+    },
+    "android": {
+      "package": "com.lucrandos.mobile",
+      "adaptiveIcon": {
+        "backgroundColor": "#07090b"
+      }
+    }
+  }
+}
