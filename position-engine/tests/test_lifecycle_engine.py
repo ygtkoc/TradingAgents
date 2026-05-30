@@ -526,3 +526,18 @@ class TestUnhandledException:
 
 def test_max_retry_failures_are_recoverable_for_open_trades():
     assert _is_transient_lifecycle_error("max retries exceeded (6 > 5)")
+
+
+@pytest.mark.parametrize(
+    "error",
+    [
+        "<ConnectionTerminated error_code:1, last_stream_id:71, additional_data:None>",
+        "<StreamReset stream_id:175, error_code:5, remote_reset:True>",
+        "StreamIDTooLowError: 149 is lower than 149",
+        "{'message': 'JSON could not be generated', 'details': 'cloudflare 400 Bad Request'}",
+        "deque mutated during iteration",
+        "dictionary keys changed during iteration",
+    ],
+)
+def test_observed_infrastructure_failures_are_recoverable(error):
+    assert _is_transient_lifecycle_error(error)
