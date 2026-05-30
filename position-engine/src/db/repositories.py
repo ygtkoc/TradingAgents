@@ -38,14 +38,28 @@ from src.utils.time import utcnow
 from src.utils.time import utcnow_iso
 
 log = get_logger(__name__)
+_db_call_lock: asyncio.Lock | None = None
+
+
+def _get_db_call_lock() -> asyncio.Lock:
+    global _db_call_lock
+    if _db_call_lock is None:
+        _db_call_lock = asyncio.Lock()
+    return _db_call_lock
 
 
 async def _run(fn, *args, **kwargs):
-    """Run a blocking supabase-py call off the event loop with transient retries."""
+    """Run a blocking supabase-py call off the event loop with transient retries.
+
+    supabase-py uses a shared sync httpx client under the hood. Concurrent
+    thread usage can corrupt the HTTP protocol state, so repository calls are
+    serialized inside this process.
+    """
     max_attempts = 3
     for attempt in range(1, max_attempts + 1):
         try:
-            return await asyncio.to_thread(fn, *args, **kwargs)
+            async with _get_db_call_lock():
+                return await asyncio.to_thread(fn, *args, **kwargs)
         except Exception as exc:
             if attempt >= max_attempts or not _is_transient_lifecycle_error(exc):
                 raise
@@ -84,8 +98,13 @@ def _is_transient_lifecycle_error(error: object) -> bool:
         "deque mutated during iteration",
         "dictionary keys changed during iteration",
         "max retries exceeded",
+        "localprotocolerror",
+        "invalid input connectioninputs",
+        "invalid input streaminputs",
+        "connectionstate.closed",
+        "received pseudo-header in trailer",
     )
-    return any(marker in text for marker in transient_markers)
+    return text.strip().isdigit() or any(marker in text for marker in transient_markers)
 
 
 # ── Trade Lifecycle Repository ─────────────────────────────────────────────────

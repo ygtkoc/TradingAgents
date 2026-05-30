@@ -537,6 +537,10 @@ def test_max_retry_failures_are_recoverable_for_open_trades():
         "{'message': 'JSON could not be generated', 'details': 'cloudflare 400 Bad Request'}",
         "deque mutated during iteration",
         "dictionary keys changed during iteration",
+        "Invalid input ConnectionInputs.RECV_HEADERS in state ConnectionState.CLOSED",
+        "Invalid input StreamInputs.SEND_HEADERS in state 5",
+        "Received pseudo-header in trailer {b':method', b':authority', b':scheme', b':path'}",
+        "175",
     ],
 )
 def test_observed_infrastructure_failures_are_recoverable(error):
