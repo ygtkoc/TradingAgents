@@ -22,10 +22,11 @@ import {
   CircleDollarSign, Minus, Plus, ShieldAlert, ShieldCheck,
   Target, TrendingDown, TrendingUp, XCircle, Zap,
 } from "lucide-react";
+import type { LucideIcon } from "lucide-react";
 import type { Trade } from "@ta/types";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useParams } from "next/navigation";
-import { useState, type ComponentType } from "react";
+import { useState } from "react";
 
 import { TradeTimeline } from "@/components/trades/trade-timeline";
 import { formatPrice } from "@/lib/format-price";
@@ -449,7 +450,7 @@ type ManualAction =
 interface ManualActionConfig {
   action: ManualAction;
   label: string;
-  icon: ComponentType<{ className?: string }>;
+  icon: LucideIcon;
   tone?: "default" | "destructive" | "outline" | "secondary";
   quantity?: boolean;
   percent?: boolean;
@@ -575,6 +576,7 @@ function ManualTradeControls({
 
   const protectiveActions = manualActions.filter((action) => action.liveAllowed);
   const tradeActions = manualActions.filter((action) => !action.liveAllowed);
+  const currentTpLevels = getTpLevels(getRewardPlan(trade.metadata), trade.metadata);
 
   return (
     <Card>
@@ -664,7 +666,40 @@ function ManualTradeControls({
                   <Field label="Stop loss" value={stopLoss} onChange={setStopLoss} />
                 ) : null}
                 {active.takeProfit ? (
-                  <Field label="Take profit" value={takeProfit} onChange={setTakeProfit} />
+                  <>
+                    {currentTpLevels.length > 0 ? (
+                      <div className="grid gap-2 sm:grid-cols-3">
+                        {currentTpLevels.map((level) => {
+                          const price = toNum(level.price);
+                          const status = String(level.status ?? "pending");
+                          return (
+                            <div
+                              key={`${String(level.label ?? "TP")}-${String(level.level ?? "")}`}
+                              className="rounded-lg border border-border/40 bg-card/50 px-3 py-2"
+                            >
+                              <div className="flex items-center justify-between gap-2">
+                                <span className="text-[11px] font-semibold text-foreground">
+                                  {String(level.label ?? `TP${String(level.level ?? "")}`)}
+                                </span>
+                                <Badge variant={status === "hit" ? "success" : "secondary"} className="text-[9px]">
+                                  {status}
+                                </Badge>
+                              </div>
+                              <div className="mt-1 font-mono text-[12px] text-success">
+                                {price != null ? formatPrice(price) : "-"}
+                              </div>
+                              <div className="mt-1 text-[10px] text-muted-foreground">
+                                {normalizePct(toNum(level.close_pct)) != null
+                                  ? `${normalizePct(toNum(level.close_pct))?.toFixed(0)}%`
+                                  : "-"}
+                              </div>
+                            </div>
+                          );
+                        })}
+                      </div>
+                    ) : null}
+                    <Field label="Final take profit" value={takeProfit} onChange={setTakeProfit} />
+                  </>
                 ) : null}
                 {error ? (
                   <div className="rounded-lg border border-destructive/30 bg-destructive/8 px-3 py-2 text-[12px] text-destructive">

@@ -67,7 +67,7 @@ export function DataTable<TData>({
                 >
                   {header.isPlaceholder
                     ? null
-                    : flexRender(header.column.columnDef.header, header.getContext())}
+                    : flexRender(header.column.columnDef.header, header.getContext()) as ReactNode}
                 </TableHead>
               ))}
             </TableRow>
@@ -108,7 +108,7 @@ export function DataTable<TData>({
               >
                 {row.getVisibleCells().map((cell) => (
                   <TableCell key={cell.id} className="py-3">
-                    {flexRender(cell.column.columnDef.cell, cell.getContext())}
+                    {flexRender(cell.column.columnDef.cell, cell.getContext()) as ReactNode}
                   </TableCell>
                 ))}
               </TableRow>

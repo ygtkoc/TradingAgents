@@ -211,6 +211,25 @@ class TestUpdatePnlAction:
 # ── Paper close (CLOSE_STOP_LOSS) ──────────────────────────────────────────────
 
 class TestPaperCloseStopLoss:
+    def test_paper_stop_loss_fast_path_closes_before_security_guard(self):
+        engine = _make_engine()
+        engine._market_data.get_snapshot = AsyncMock(
+            return_value=make_snapshot(close_price=48_000.0)
+        )
+        trade = make_trade(
+            mode="paper",
+            direction="long",
+            entry_price=50_000.0,
+            stop_loss=49_000.0,
+            quantity=1.0,
+        )
+
+        run(engine._run_pipeline(trade))
+
+        engine._lifecycle_repo.mark_closed.assert_awaited_once()
+        engine._security_guard.check.assert_not_called()
+        engine._context_repo.get_bot.assert_not_awaited()
+
     def test_stop_loss_triggers_paper_close(self):
         engine = _make_engine()
         # Price=48_000, stop_loss=49_000 → long stop-loss trigger
@@ -501,6 +520,15 @@ class TestNoNewTradeCreation:
 # ── Unhandled exception → mark_failed ─────────────────────────────────────────
 
 class TestUnhandledException:
+    def test_paper_timeout_releases_claim_without_reconciliation_pause(self):
+        engine = _make_engine()
+        trade = make_trade(mode="paper")
+        with patch("src.lifecycle.engine.asyncio.wait_for", AsyncMock(side_effect=asyncio.TimeoutError)):
+            run(engine.run(trade))
+
+        engine._lifecycle_repo.release_claim.assert_awaited_once_with(trade.id)
+        engine._lifecycle_repo.mark_needs_reconciliation.assert_not_awaited()
+
     def test_exception_in_pipeline_marks_failed(self):
         """A non-recoverable exception in the pipeline causes mark_failed to be called."""
         engine = _make_engine()

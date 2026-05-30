@@ -143,7 +143,17 @@ class LifecycleEngine:
         except asyncio.TimeoutError:
             msg = f"Lifecycle pipeline timed out"
             log.error("lifecycle.timeout", trade_id=trade.id)
-            await self._lifecycle_repo.mark_needs_reconciliation(trade.id, msg)
+            if trade.is_live:
+                await self._lifecycle_repo.mark_needs_reconciliation(trade.id, msg)
+            else:
+                await self._event_repo.create(TradeEventInsert(
+                    trade_id=trade.id,
+                    bot_id=trade.bot_id,
+                    user_id=trade.user_id,
+                    event_type="lifecycle_timeout_released",
+                    details={"reason": msg, "mode": trade.mode},
+                ))
+                await self._lifecycle_repo.release_claim(trade.id)
         except Exception as exc:
             log.error(
                 "lifecycle.unhandled_error",
@@ -163,6 +173,46 @@ class LifecycleEngine:
             return
 
         # ── Step 1: Load context ──────────────────────────────────────────────
+        if trade.mode in ("paper", "shadow") and trade.status == "open":
+            market_snapshot = await self._market_data.get_snapshot(trade.exchange, trade.symbol)
+            current_price = self._resolve_price(trade, market_snapshot)
+            if current_price <= 0:
+                await self._event_repo.create(TradeEventInsert(
+                    trade_id=trade.id,
+                    bot_id=trade.bot_id,
+                    user_id=trade.user_id,
+                    event_type="price_checked",
+                    details={"error": "No valid price available", "current_price": current_price},
+                ))
+                await self._lifecycle_repo.release_claim(trade.id)
+                return
+
+            protective_action = self._evaluate_protective_triggers(
+                trade=trade,
+                current_price=current_price,
+                market_snapshot=market_snapshot,
+            )
+            if protective_action.action_type in (
+                ActionType.CLOSE_STOP_LOSS,
+                ActionType.CLOSE_TAKE_PROFIT,
+            ):
+                log.info(
+                    "lifecycle.fast_protective_action_selected",
+                    trade_id=trade.id,
+                    action=protective_action.action_type.name,
+                    reason=protective_action.reason[:200],
+                )
+                await self._apply_action(
+                    trade=trade,
+                    action=protective_action,
+                    current_price=current_price,
+                    bot=None,
+                    exchange_account=None,
+                    market_snapshot=market_snapshot,
+                    platform_settings=PlatformSettings(),
+                )
+                return
+
         ps, bot, user_settings, exchange_account, market_snapshot = (
             await self._load_context(trade)
         )
@@ -455,6 +505,36 @@ class LifecycleEngine:
         return highest_priority(actions)
 
     # ── Action application ────────────────────────────────────────────────────
+
+    def _evaluate_protective_triggers(
+        self,
+        *,
+        trade: Trade,
+        current_price: float,
+        market_snapshot: Optional[MarketSnapshot],
+    ) -> LifecycleAction:
+        """Evaluate stop-loss and take-profit before slower advisory checks."""
+        actions: list[LifecycleAction] = [
+            check_stop_loss(
+                trade,
+                current_price,
+                high_price=current_price,
+                low_price=current_price,
+            ),
+            check_scaled_take_profit(
+                trade,
+                current_price,
+                high_price=current_price,
+                low_price=current_price,
+            ),
+            check_take_profit(
+                trade,
+                current_price,
+                high_price=current_price,
+                low_price=current_price,
+            ),
+        ]
+        return highest_priority(actions)
 
     async def _apply_action(
         self,
