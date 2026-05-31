@@ -3,6 +3,42 @@ import type { ReactNode } from "react";
 
 import { createServerClient } from "@ta/supabase/server";
 import { AppShell, Badge } from "@ta/ui";
+import { cn } from "@ta/utils";
+
+const navSections = [
+  {
+    title: "Command",
+    items: [
+      ["OV", "Overview", "/overview"],
+      ["US", "Users", "/users"],
+      ["BR", "Trading brain", "/trading-brain"],
+    ],
+  },
+  {
+    title: "Trading",
+    items: [
+      ["TR", "Trades", "/trades"],
+      ["DC", "Decisions", "/decisions"],
+      ["AR", "Agent runs", "/agent-runs"],
+      ["RC", "Reconciliation", "/reconciliation"],
+    ],
+  },
+  {
+    title: "Logs",
+    items: [
+      ["SC", "Security logs", "/logs/security"],
+      ["RK", "Risk logs", "/logs/risk"],
+      ["AU", "Audit logs", "/logs/audit"],
+    ],
+  },
+  {
+    title: "System",
+    items: [
+      ["PS", "Platform settings", "/system/platform-settings"],
+      ["KS", "Kill switch", "/operations/kill-switch"],
+    ],
+  },
+];
 
 export default async function AdminShellLayout({ children }: { children: ReactNode }) {
   const supabase = createServerClient();
@@ -22,51 +58,62 @@ export default async function AdminShellLayout({ children }: { children: ReactNo
     notFound();
   }
 
-  const links = [
-    ["Overview", "/overview"],
-    ["Users", "/users"],
-    ["Trades", "/trades"],
-    ["Decisions", "/decisions"],
-    ["Agent runs", "/agent-runs"],
-    ["Trading brain", "/trading-brain"],
-    ["Reconciliation", "/reconciliation"],
-    ["Security logs", "/logs/security"],
-    ["Risk logs", "/logs/risk"],
-    ["Audit logs", "/logs/audit"],
-    ["Platform settings", "/system/platform-settings"],
-    ["Kill switch", "/operations/kill-switch"],
-  ];
-
   return (
     <AppShell
       banner={
-        <div className="border-b border-warning/20 bg-warning/12 px-4 py-2 text-center text-xs font-medium text-warning">
-          Admin console: privileged actions are audited.
+        <div className="border-b border-sky-500/15 bg-sky-500/8 px-4 py-2 text-center text-xs font-medium text-sky-300">
+          Lucrandos admin plane. Every privileged action should remain auditable.
         </div>
       }
       sidebar={
-        <nav className="flex h-full flex-col gap-1 p-4 text-sm">
-          <div className="mb-4 rounded-lg border border-border/60 bg-card/45 p-3">
-            <div className="text-[15px] font-semibold">lucrandos Admin</div>
-            <div className="text-[10px] uppercase tracking-[0.16em] text-muted-foreground">Operations plane</div>
+        <nav className="flex h-full flex-col bg-[#080b10] p-4 text-sm">
+          <div className="mb-5 rounded-xl border border-white/10 bg-white/[0.045] p-4 shadow-[0_16px_60px_rgba(0,0,0,0.28)]">
+            <div className="flex items-center gap-3">
+              <div className="flex h-10 w-10 items-center justify-center rounded-lg bg-cyan-400 text-sm font-black text-slate-950">L</div>
+              <div>
+                <div className="text-[15px] font-semibold tracking-[0] text-foreground">Lucrandos</div>
+                <div className="text-[10px] font-bold uppercase tracking-[0.18em] text-muted-foreground">Admin OS</div>
+              </div>
+            </div>
           </div>
-          <span className="mb-1 px-2 text-[10px] font-semibold uppercase tracking-[0.16em] text-muted-foreground">
-            Control surfaces
-          </span>
-          {links.map(([label, href]) => (
-            <a key={href} className="rounded-md px-3 py-2 text-muted-foreground transition-colors hover:bg-white/[0.055] hover:text-foreground" href={href}>
-              {label}
-            </a>
-          ))}
+          <div className="min-h-0 flex-1 space-y-5 overflow-y-auto pr-1">
+            {navSections.map((section) => (
+              <div key={section.title}>
+                <div className="mb-2 px-2 text-[10px] font-black uppercase tracking-[0.18em] text-muted-foreground/65">
+                  {section.title}
+                </div>
+                <div className="space-y-1">
+                  {section.items.map(([code, label, href]) => (
+                    <a
+                      key={href}
+                      className={cn(
+                        "group flex items-center gap-3 rounded-lg px-2.5 py-2.5 text-muted-foreground transition-all",
+                        "hover:bg-white/[0.065] hover:text-foreground",
+                      )}
+                      href={href}
+                    >
+                      <span className="flex h-7 w-7 items-center justify-center rounded-md border border-white/10 bg-white/[0.04] text-[10px] font-black text-cyan-200 group-hover:border-cyan-300/35 group-hover:bg-cyan-300/10">
+                        {code}
+                      </span>
+                      <span className="truncate text-[13px] font-semibold">{label}</span>
+                    </a>
+                  ))}
+                </div>
+              </div>
+            ))}
+          </div>
         </nav>
       }
       topBar={
-        <div className="flex h-14 w-full items-center justify-between">
-          <div className="flex items-center gap-3">
-            <span className="text-sm font-semibold">Admin operations</span>
-            <Badge variant="warning">admin</Badge>
+        <div className="flex h-16 w-full items-center justify-between">
+          <div>
+            <div className="text-sm font-semibold tracking-[0] text-foreground">Operations cockpit</div>
+            <div className="text-[11px] text-muted-foreground">Monitoring, controls, and platform intelligence</div>
           </div>
-          <span className="text-xs text-muted-foreground">{user.email}</span>
+          <div className="flex items-center gap-3">
+            <Badge variant="warning">{profileRole}</Badge>
+            <span className="hidden text-xs text-muted-foreground sm:block">{user.email}</span>
+          </div>
         </div>
       }
     >
