@@ -8,7 +8,7 @@
  * Returns the user (if any) and the patched response so the caller can do
  * role-based gating.
  */
-import { NextResponse, type NextRequest } from "next/server";
+import { NextResponse } from "next/server";
 
 import { env } from "@ta/config/env";
 import type { Database } from "@ta/types/database";
@@ -16,13 +16,23 @@ import type { UserRole } from "@ta/types/enums";
 import { createServerClient as _createServerClient, type CookieOptions } from "@supabase/ssr";
 
 export interface UpdateSessionResult {
-  response: NextResponse;
+  response: Response;
   userId:   string | null;
   email:    string | null;
   role:     UserRole;
 }
 
-export async function updateSession(request: NextRequest): Promise<UpdateSessionResult> {
+interface MiddlewareCookieStore {
+  get(name: string): { value: string } | undefined;
+  set(cookie: { name: string; value: string } & CookieOptions): void;
+}
+
+interface MiddlewareRequestLike {
+  headers: Headers;
+  cookies: MiddlewareCookieStore;
+}
+
+export async function updateSession(request: MiddlewareRequestLike): Promise<UpdateSessionResult> {
   let response = NextResponse.next({ request: { headers: request.headers } });
 
   const supabase = _createServerClient<Database>(
