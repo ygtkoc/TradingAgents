@@ -159,6 +159,17 @@ export default function AdminTradingBrainPage() {
           </CardHeader>
           <CardContent className="space-y-3">
             <Input placeholder="Title" value={title} onChange={(event) => setTitle(event.target.value)} />
+            <Input
+              type="file"
+              accept=".json,.txt,application/json,text/plain"
+              onChange={async (event) => {
+                const file = event.target.files?.[0];
+                if (!file) return;
+                setContent(await file.text());
+                setImportResult(`Loaded ${file.name}. Review it, then import globally.`);
+                event.target.value = "";
+              }}
+            />
             <select
               className="h-10 w-full rounded-md border border-border bg-background px-3 text-sm text-foreground"
               value={sourceType}
