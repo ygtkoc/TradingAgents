@@ -36,6 +36,7 @@ from src.db.repositories import (
     AuditLogRepository,
     BotRepository,
     DuplicateOpenExposureError,
+    KnowledgeRepository,
     PlatformSettingsRepository,
     RiskLogRepository,
     SecurityLogRepository,
@@ -50,6 +51,7 @@ from src.execution.reward_plan import final_take_profit, normalize_reward_plan
 from src.execution.shadow_executor import ShadowExecutor
 from src.guards.risk_guard import RiskExecutionGuard
 from src.guards.security_guard import SecurityExecutionGuard
+from src.guards.knowledge_gate import KnowledgeGate
 from src.logging_config import get_logger
 from src.services.market_data import MarketDataService
 from src.services.futures_metadata import FuturesMetadataService
@@ -73,10 +75,12 @@ class ExecutionEngine:
         self._platform_repo = PlatformSettingsRepository()
         self._audit_log = AuditLogRepository()
         self._risk_log = RiskLogRepository()
+        self._knowledge_repo = KnowledgeRepository()
         self._security_log = SecurityLogRepository()
         self._trade_repo = TradeRepository()
         self._security_guard = SecurityExecutionGuard()
         self._risk_guard = RiskExecutionGuard()
+        self._knowledge_gate = KnowledgeGate()
         self._idempotency = IdempotencyChecker()
         self._market_data = MarketDataService()
         self._futures_metadata = FuturesMetadataService()
@@ -271,6 +275,55 @@ class ExecutionEngine:
                 symbol=decision.symbol,
                 mode=execution_mode,
             )
+            return
+
+        knowledge_tags = self._knowledge_gate.tags_for_decision(decision)
+        knowledge_rules, knowledge_chunks = await asyncio.gather(
+            self._knowledge_repo.fetch_rules(decision.user_id),
+            self._knowledge_repo.fetch_relevant_chunks(
+                user_id=decision.user_id,
+                tags=knowledge_tags,
+            ),
+        )
+        knowledge_result = self._knowledge_gate.evaluate(
+            decision=decision,
+            market_snapshot=market_snapshot,
+            rules=knowledge_rules,
+            chunks=knowledge_chunks,
+        )
+        await self._knowledge_repo.upsert_review(
+            {
+                "trade_decision_id": decision.id,
+                "user_id": decision.user_id,
+                "knowledge_score": knowledge_result.score,
+                "verdict": knowledge_result.verdict,
+                "supporting_rules": knowledge_result.supporting_rules,
+                "violated_rules": knowledge_result.violated_rules,
+                "retrieved_chunks": knowledge_result.retrieved_chunks,
+                "critic_summary": knowledge_result.critic_summary,
+                "visual_annotations": knowledge_result.visual_annotations,
+            }
+        )
+        if knowledge_result.blocked:
+            reason = f"Knowledge gate blocked execution: {knowledge_result.critic_summary}"
+            await self._risk_log.create(
+                RiskLogInsert(
+                    user_id=decision.user_id,
+                    bot_id=decision.bot_id,
+                    trade_decision_id=decision.id,
+                    risk_type="knowledge_gate",
+                    severity=SeverityLevel.HIGH.value,
+                    triggered=True,
+                    message=reason[:400],
+                    metadata={
+                        "decision_id": decision.id,
+                        "knowledge_score": knowledge_result.score,
+                        "violated_rules": knowledge_result.violated_rules,
+                    },
+                )
+            )
+            await self._notifications.trade_skipped(decision=decision, reason=reason)
+            await self._decision_repo.mark_skipped(decision.id, reason[:500])
             return
 
         entry_price_estimate = self._estimate_entry_price(decision, market_snapshot)

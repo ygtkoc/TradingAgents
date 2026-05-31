@@ -484,6 +484,65 @@ class RiskLogRepository:
         await _run(_insert)
 
 
+class KnowledgeRepository:
+    def __init__(self) -> None:
+        self._client = get_client()
+
+    async def fetch_rules(self, user_id: str) -> list[dict]:
+        def _select():
+            return (
+                self._client.table("trading_strategy_rules")
+                .select("*")
+                .eq("active", True)
+                .or_(f"user_id.is.null,user_id.eq.{user_id}")
+                .order("created_at", desc=False)
+                .execute()
+            )
+
+        result = await _run(_select)
+        return result.data or []
+
+    async def fetch_relevant_chunks(
+        self,
+        *,
+        user_id: str,
+        tags: list[str],
+        limit: int = 8,
+    ) -> list[dict]:
+        def _select():
+            return (
+                self._client.table("trading_knowledge_chunks")
+                .select("id, source_id, content, tags, metadata")
+                .or_(f"user_id.is.null,user_id.eq.{user_id}")
+                .limit(50)
+                .execute()
+            )
+
+        result = await _run(_select)
+        rows = result.data or []
+        if not tags:
+            return rows[:limit]
+        wanted = set(tags)
+        ranked = [
+            row for row in rows
+            if wanted.intersection(set(row.get("tags") or []))
+        ]
+        return (ranked or rows)[:limit]
+
+    async def upsert_review(self, review: dict) -> None:
+        if settings.dry_run:
+            return
+
+        def _upsert():
+            return (
+                self._client.table("decision_knowledge_reviews")
+                .upsert(review, on_conflict="trade_decision_id")
+                .execute()
+            )
+
+        await _run(_upsert)
+
+
 class SecurityLogRepository:
     async def create(self, entry: SecurityLogInsert) -> None:
         if settings.dry_run:

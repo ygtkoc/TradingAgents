@@ -201,6 +201,28 @@ export function useTradeEventsForDecision(decisionId: string | null | undefined)
   });
 }
 
+export function useKnowledgeReviewForDecision(decisionId: string | null | undefined) {
+  return useQuery<Record<string, unknown> | null>({
+    queryKey: ["decisions", "knowledge-review", decisionId],
+    enabled:  !!decisionId,
+    staleTime: 0,
+    refetchInterval: 5_000,
+    queryFn: async () => {
+      if (!decisionId) return null;
+      const { data, error } = await supabase
+        .from("decision_knowledge_reviews")
+        .select("*")
+        .eq("trade_decision_id", decisionId)
+        .maybeSingle();
+      if (error) {
+        console.error("decision.detail.knowledge_review.failed", { decision_id: decisionId, error });
+        throw error;
+      }
+      return (data ?? null) as Record<string, unknown> | null;
+    },
+  });
+}
+
 // Re-exports for convenience inside the detail page
 export { useDecision } from "./use-decisions";
 export { useCurrentUser };

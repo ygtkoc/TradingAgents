@@ -24,6 +24,7 @@ import { formatPrice } from "@/lib/format-price";
 import { useDecisionMutations } from "@/lib/hooks/mutations/use-decision-mutations";
 import {
   useAgentOutputs, useDecisionAgentRuns, useSignal,
+  useKnowledgeReviewForDecision,
   useTradeEventsForDecision, useTradeForDecision,
 } from "@/lib/hooks/queries/use-decision-detail";
 import { useDecision } from "@/lib/hooks/queries/use-decisions";
@@ -204,6 +205,7 @@ export default function DecisionDetailPage() {
   const outputsQ   = useAgentOutputs(primaryRun?.id ?? null);
   const tradeQ     = useTradeForDecision(decisionId);
   const eventsQ    = useTradeEventsForDecision(decisionId);
+  const knowledgeQ = useKnowledgeReviewForDecision(decisionId);
   const decisionMutations = useDecisionMutations();
 
   useEffect(() => {
@@ -375,6 +377,7 @@ export default function DecisionDetailPage() {
         trade={tradeQ.data ?? null}
         isLoading={tradeQ.isLoading}
       />
+      <KnowledgeGateCard review={knowledgeQ.data ?? null} isLoading={knowledgeQ.isLoading} />
       <DecisionTakeProfitPlanCard decision={decision} trade={tradeQ.data ?? null} />
 
       <DecisionApprovalPanel
@@ -668,6 +671,137 @@ function DecisionStateTile({
       <div className="text-[9px] font-semibold uppercase tracking-[0.12em] text-muted-foreground/60">{label}</div>
       <div className={cn("mt-1 text-[14px] font-semibold capitalize text-foreground", className)}>{value}</div>
       <div className="mt-0.5 text-[11px] text-muted-foreground">{detail}</div>
+    </div>
+  );
+}
+
+function KnowledgeGateCard({
+  isLoading,
+  review,
+}: {
+  isLoading: boolean;
+  review: Record<string, unknown> | null;
+}) {
+  if (isLoading) return <Skeleton className="h-40 rounded-xl" />;
+  if (!review) return null;
+
+  const score = Number(review.knowledge_score ?? 0);
+  const verdict = String(review.verdict ?? "review");
+  const violated = Array.isArray(review.violated_rules) ? review.violated_rules as Record<string, unknown>[] : [];
+  const supporting = Array.isArray(review.supporting_rules) ? review.supporting_rules as Record<string, unknown>[] : [];
+  const annotations = (review.visual_annotations ?? {}) as Record<string, unknown>;
+
+  return (
+    <Card className={cn(
+      verdict === "block" ? "border-destructive/25 bg-destructive/5"
+      : verdict === "review" ? "border-warning/25 bg-warning/5"
+      : "border-success/25 bg-success/5",
+    )}>
+      <CardHeader>
+        <div className="flex flex-wrap items-start justify-between gap-3">
+          <div>
+            <CardTitle className="flex items-center gap-2">
+              <Brain className="h-4 w-4" />
+              Strategy Knowledge Gate
+            </CardTitle>
+            <CardDescription>{String(review.critic_summary ?? "")}</CardDescription>
+          </div>
+          <Badge variant={verdict === "block" ? "destructive" : verdict === "review" ? "warning" : "success"}>
+            {verdict} / {score}
+          </Badge>
+        </div>
+      </CardHeader>
+      <CardContent className="grid gap-4 lg:grid-cols-[1.1fr_0.9fr]">
+        <TradingViewReasoningMock annotations={annotations} />
+        <div className="space-y-3">
+          <RuleList title="Violated rules" tone="bad" rows={violated} empty="No violations." />
+          <RuleList title="Supporting rules" tone="good" rows={supporting.slice(0, 5)} empty="No supporting rules recorded." />
+        </div>
+      </CardContent>
+    </Card>
+  );
+}
+
+function TradingViewReasoningMock({ annotations }: { annotations: Record<string, unknown> }) {
+  const lines = Array.isArray(annotations.lines) ? annotations.lines as Record<string, unknown>[] : [];
+  const prices = lines.map((line) => Number(line.price)).filter((value) => Number.isFinite(value) && value > 0);
+  const last = Number(annotations.last_price ?? prices[0] ?? 1);
+  const min = Math.min(...prices, last) * 0.995;
+  const max = Math.max(...prices, last) * 1.005;
+  const range = Math.max(max - min, 0.000001);
+
+  return (
+    <div className="relative min-h-80 overflow-hidden rounded-xl border border-border/50 bg-background/60 p-4">
+      <div className="absolute inset-0 bg-[linear-gradient(to_right,rgba(255,255,255,0.045)_1px,transparent_1px),linear-gradient(to_bottom,rgba(255,255,255,0.045)_1px,transparent_1px)] bg-[size:48px_48px]" />
+      <div className="relative mb-3 flex items-center justify-between">
+        <div>
+          <div className="text-[10px] font-bold uppercase tracking-[0.14em] text-muted-foreground">TradingView reasoning</div>
+          <div className="font-mono text-sm font-semibold text-foreground">{String(annotations.symbol ?? "-")} / {String(annotations.direction ?? "-")}</div>
+        </div>
+        <div className="text-right font-mono text-sm text-foreground">{formatPrice(last)}</div>
+      </div>
+      <div className="relative h-56">
+        {lines.map((line, index) => {
+          const price = Number(line.price);
+          if (!Number.isFinite(price)) return null;
+          const top = `${100 - ((price - min) / range) * 100}%`;
+          const type = String(line.type ?? "");
+          return (
+            <div key={`${type}-${index}`} className="absolute left-0 right-0" style={{ top }}>
+              <div className={cn(
+                "h-px",
+                type === "invalidation" ? "bg-destructive"
+                : type === "take_profit" ? "bg-success"
+                : type === "entry" ? "bg-primary"
+                : "bg-warning",
+              )} />
+              <div className="mt-1 flex items-center justify-between gap-3 text-[11px]">
+                <span className="rounded bg-background/90 px-2 py-1 font-semibold text-foreground">{String(line.label ?? type)}</span>
+                <span className="rounded bg-background/90 px-2 py-1 font-mono text-muted-foreground">{formatPrice(price)}</span>
+              </div>
+            </div>
+          );
+        })}
+      </div>
+      <div className="relative mt-3 space-y-1">
+        {lines.slice(0, 5).map((line, index) => (
+          <p key={index} className="text-xs leading-5 text-muted-foreground">
+            <span className="font-semibold text-foreground">{String(line.label ?? line.type)}:</span> {String(line.reason ?? "")}
+          </p>
+        ))}
+        <p className="text-xs leading-5 text-muted-foreground">
+          <span className="font-semibold text-foreground">Trendline:</span> {String(((annotations.trendline as Record<string, unknown> | undefined)?.reason) ?? "No trendline rationale recorded.")}
+        </p>
+      </div>
+    </div>
+  );
+}
+
+function RuleList({
+  empty,
+  rows,
+  title,
+  tone,
+}: {
+  empty: string;
+  rows: Record<string, unknown>[];
+  title: string;
+  tone: "good" | "bad";
+}) {
+  return (
+    <div className="rounded-xl border border-border/50 bg-card/50 p-3">
+      <div className="text-[11px] font-bold uppercase tracking-[0.14em] text-muted-foreground">{title}</div>
+      {rows.length === 0 ? <p className="mt-2 text-sm text-muted-foreground">{empty}</p> : null}
+      <div className="mt-2 space-y-2">
+        {rows.map((rule, index) => (
+          <div key={index} className="rounded-lg border border-border/40 bg-background/45 p-2">
+            <div className={cn("text-sm font-semibold", tone === "good" ? "text-success" : "text-destructive")}>
+              {String(rule.title ?? rule.rule_code ?? "Rule")}
+            </div>
+            <div className="mt-1 text-xs leading-5 text-muted-foreground">{String(rule.reason ?? "")}</div>
+          </div>
+        ))}
+      </div>
     </div>
   );
 }
