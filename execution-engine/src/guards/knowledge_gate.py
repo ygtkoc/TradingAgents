@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+import json
+import re
 from typing import Any, Optional
 
 from src.db.models import MarketSnapshot, TradeDecision
@@ -42,6 +44,7 @@ class KnowledgeGate:
         violated: list[dict[str, Any]] = []
 
         context = self._context(decision, market_snapshot)
+        knowledge_evidence = self._rank_chunks(chunks, context)
         for rule in rules:
             code = str(rule.get("rule_code") or "")
             weight = int(rule.get("weight") or 10)
@@ -60,20 +63,25 @@ class KnowledgeGate:
                 violated.append(item)
                 score -= weight
 
+        evidence_result = self._evaluate_evidence(context, knowledge_evidence)
+        supporting.extend(evidence_result["supporting"])
+        violated.extend(evidence_result["violated"])
+        score -= int(evidence_result["penalty"])
+
         score = max(0, min(100, score))
         verdict = "pass" if score >= self.REVIEW_THRESHOLD else "review"
         critical_violations = [v for v in violated if v.get("severity") == "critical"]
         if score < self.BLOCK_THRESHOLD or critical_violations:
             verdict = "block"
 
-        visual = self._visual_annotations(decision, market_snapshot, context)
+        visual = self._visual_annotations(decision, market_snapshot, context, knowledge_evidence)
         summary = self._critic_summary(
             decision=decision,
             score=score,
             verdict=verdict,
             violated=violated,
             supporting=supporting,
-            chunks=chunks,
+            chunks=knowledge_evidence,
         )
 
         return KnowledgeGateResult(
@@ -89,7 +97,7 @@ class KnowledgeGate:
                     "tags": c.get("tags") or [],
                     "excerpt": str(c.get("content") or "")[:420],
                 }
-                for c in chunks[:8]
+                for c in knowledge_evidence[:8]
             ],
             critic_summary=summary,
             visual_annotations=visual,
@@ -97,15 +105,35 @@ class KnowledgeGate:
 
     def tags_for_decision(self, decision: TradeDecision) -> list[str]:
         tags = {"risk", "stop-loss", "take-profit", "position-sizing"}
-        final = str(decision.final_decision or "")
-        direction = str(decision.direction or "")
+        final = str(decision.final_decision or "").lower()
+        direction = str(decision.direction or "").lower()
+        text = self._decision_text(decision).lower()
         if "long" in final or direction == "long":
-            tags.add("long")
+            tags.update({"long", "bullish"})
         if "short" in final or direction == "short":
-            tags.add("short")
-        for key in ("breakout", "trend", "support", "resistance", "liquidity"):
-            if key in str(decision.score_summary).lower() or key in str(decision.risk_summary).lower():
-                tags.add(key)
+            tags.update({"short", "bearish"})
+        keyword_tags = {
+            "breakout": ("breakout", "break above", "broke above"),
+            "breakdown": ("breakdown", "break below", "broke below"),
+            "trend": ("trend", "continuation", "impulse"),
+            "support": ("support", "demand"),
+            "resistance": ("resistance", "supply"),
+            "liquidity": ("liquidity", "sweep", "stop hunt"),
+            "reversal": ("reversal", "reject", "reclaim"),
+            "compression": ("compression", "contract", "squeeze"),
+            "bull_flag": ("bull flag", "bull_flag"),
+            "bear_flag": ("bear flag", "bear_flag"),
+            "ascending_triangle": ("ascending triangle", "ascending_triangle"),
+            "descending_triangle": ("descending triangle", "descending_triangle"),
+            "head_and_shoulders": ("head and shoulders", "head_shoulders"),
+            "double_top": ("double top", "double_top"),
+            "double_bottom": ("double bottom", "double_bottom"),
+            "wedge": ("wedge", "rising wedge", "falling wedge"),
+            "range": ("range", "shelf", "base"),
+        }
+        for tag, terms in keyword_tags.items():
+            if any(term in text for term in terms):
+                tags.add(tag)
         return sorted(tags)
 
     def _context(self, decision: TradeDecision, market_snapshot: Optional[MarketSnapshot]) -> dict[str, Any]:
@@ -133,6 +161,7 @@ class KnowledgeGate:
             "direction": direction,
             "move_from_open": move_from_open,
             "market": market_snapshot,
+            "text": self._decision_text(decision).lower(),
         }
 
     def _check_rule(self, code: str, context: dict[str, Any], duplicate_exposure_blocked: bool) -> tuple[bool, str]:
@@ -150,11 +179,65 @@ class KnowledgeGate:
             return bool(context["entry"] and context["stop"]), "Visual annotations can be generated." if context["entry"] and context["stop"] else "Visual annotations lack entry/stop."
         return True, "Custom knowledge rule recorded for review."
 
+    def _evaluate_evidence(self, context: dict[str, Any], chunks: list[dict]) -> dict[str, Any]:
+        supporting: list[dict[str, Any]] = []
+        violated: list[dict[str, Any]] = []
+        penalty = 0
+
+        if not chunks:
+            return {
+                "supporting": supporting,
+                "violated": [{
+                    "rule_code": "knowledge_retrieval_missing",
+                    "title": "No relevant knowledge retrieved",
+                    "category": "knowledge",
+                    "severity": "medium",
+                    "reason": "Trading Brain could not match this decision to imported knowledge.",
+                    "weight": 8,
+                }],
+                "penalty": 8,
+            }
+
+        top = chunks[0]
+        meta = self._metadata(top)
+        supporting.append({
+            "rule_code": "knowledge_pattern_match",
+            "title": top.get("metadata", {}).get("source_title") or "Knowledge evidence matched",
+            "category": meta.get("category") or "knowledge",
+            "severity": "medium",
+            "reason": self._evidence_reason(top),
+            "weight": 0,
+        })
+
+        if meta.get("confirmation_logic") and not self._mentions_confirmation(context["text"]):
+            penalty += 6
+            violated.append({
+                "rule_code": "confirmation_logic_missing",
+                "title": "Pattern confirmation not explicit",
+                "category": meta.get("category") or "knowledge",
+                "severity": "medium",
+                "reason": f"Matched knowledge expects confirmation: {meta.get('confirmation_logic')}",
+                "weight": 6,
+            })
+        if meta.get("invalidation_logic") and not context.get("stop"):
+            penalty += 14
+            violated.append({
+                "rule_code": "knowledge_invalidation_missing",
+                "title": "Pattern invalidation missing",
+                "category": meta.get("category") or "risk",
+                "severity": "high",
+                "reason": f"Matched knowledge requires invalidation: {meta.get('invalidation_logic')}",
+                "weight": 14,
+            })
+
+        return {"supporting": supporting, "violated": violated, "penalty": penalty}
+
     def _visual_annotations(
         self,
         decision: TradeDecision,
         market_snapshot: Optional[MarketSnapshot],
         context: dict[str, Any],
+        chunks: list[dict],
     ) -> dict[str, Any]:
         entry = context["entry"]
         stop = context["stop"]
@@ -192,6 +275,7 @@ class KnowledgeGate:
                 "points": trend,
                 "reason": "Trendline connects the latest snapshot open and close until richer candle structure is attached.",
             },
+            "knowledge_overlays": [self._overlay_from_chunk(chunk) for chunk in chunks[:5]],
         }
 
     def _critic_summary(
@@ -212,7 +296,110 @@ class KnowledgeGate:
             lead = "Knowledge gate found the setup consistent with the current rule base."
         problems = "; ".join(str(v.get("reason")) for v in violated[:3]) or "No major violations."
         evidence = len(chunks)
-        return f"{lead} Score {score}/100. Main critique: {problems} Retrieved knowledge snippets: {evidence}."
+        pattern = ""
+        if chunks:
+            meta = self._metadata(chunks[0])
+            source_title = chunks[0].get("metadata", {}).get("source_title") or chunks[0].get("source_id")
+            pattern = (
+                f" Best match: {source_title}. "
+                f"Confirmation: {meta.get('confirmation_logic') or 'not specified'}. "
+                f"Invalidation: {meta.get('invalidation_logic') or 'not specified'}."
+            )
+        return f"{lead} Score {score}/100. Main critique: {problems}.{pattern} Retrieved knowledge snippets: {evidence}."
+
+    def _rank_chunks(self, chunks: list[dict], context: dict[str, Any]) -> list[dict]:
+        text_tokens = self._tokens(context.get("text") or "")
+
+        def score(chunk: dict) -> int:
+            meta = self._metadata(chunk)
+            chunk_text = f"{chunk.get('content') or ''} {json.dumps(meta, ensure_ascii=False)}".lower()
+            tags = {str(tag).lower() for tag in chunk.get("tags") or []}
+            points = len(tags.intersection(text_tokens)) * 8
+            points += len(self._tokens(chunk_text).intersection(text_tokens))
+            if context.get("direction") == "long" and {"bullish", "breakout", "long"}.intersection(tags):
+                points += 6
+            if context.get("direction") == "short" and {"bearish", "breakdown", "short"}.intersection(tags):
+                points += 6
+            priority = str(meta.get("priority") or "").lower()
+            if priority == "critical":
+                points += 4
+            elif priority == "high":
+                points += 2
+            return points
+
+        ranked = sorted(chunks, key=score, reverse=True)
+        return [chunk for chunk in ranked if score(chunk) > 0] or ranked[:8]
+
+    def _overlay_from_chunk(self, chunk: dict) -> dict[str, Any]:
+        meta = self._metadata(chunk)
+        return {
+            "source_id": chunk.get("source_id"),
+            "title": chunk.get("metadata", {}).get("source_title"),
+            "tags": chunk.get("tags") or [],
+            "category": meta.get("category"),
+            "confirmation_logic": meta.get("confirmation_logic"),
+            "invalidation_logic": meta.get("invalidation_logic"),
+            "common_mistake": meta.get("common_mistake"),
+        }
+
+    def _metadata(self, chunk: dict) -> dict[str, Any]:
+        metadata = chunk.get("metadata") or {}
+        if not isinstance(metadata, dict):
+            return {}
+        source_metadata = metadata.get("source_metadata")
+        if isinstance(source_metadata, dict):
+            return {**metadata, **source_metadata}
+        return metadata
+
+    def _evidence_reason(self, chunk: dict) -> str:
+        meta = self._metadata(chunk)
+        reason = []
+        if meta.get("confirmation_logic"):
+            reason.append(f"confirmation: {meta['confirmation_logic']}")
+        if meta.get("invalidation_logic"):
+            reason.append(f"invalidation: {meta['invalidation_logic']}")
+        if meta.get("common_mistake"):
+            reason.append(f"common mistake: {meta['common_mistake']}")
+        return "; ".join(reason) or "Imported knowledge matched the decision context."
+
+    def _mentions_confirmation(self, text: str) -> bool:
+        return any(
+            term in text
+            for term in (
+                "confirm",
+                "confirmation",
+                "close above",
+                "close below",
+                "breakout",
+                "breakdown",
+                "retest",
+                "volume",
+                "hold",
+                "reject",
+                "reclaim",
+            )
+        )
+
+    def _decision_text(self, decision: TradeDecision) -> str:
+        payload = {
+            "score_summary": decision.score_summary,
+            "risk_summary": decision.risk_summary,
+            "security_summary": decision.security_summary,
+            "veto_summary": decision.veto_summary,
+            "agent_outputs_snapshot": decision.agent_outputs_snapshot,
+            "metadata": decision.metadata,
+            "symbol": decision.symbol,
+            "direction": decision.direction,
+            "final_decision": decision.final_decision,
+        }
+        return json.dumps(payload, ensure_ascii=False, default=str)
+
+    def _tokens(self, value: str) -> set[str]:
+        return {
+            token
+            for token in re.split(r"[^a-zA-Z0-9_]+", value.lower())
+            if len(token) >= 3
+        }
 
     def _num(self, value: Any) -> Optional[float]:
         try:

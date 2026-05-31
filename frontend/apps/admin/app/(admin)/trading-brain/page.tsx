@@ -90,7 +90,11 @@ export default function AdminTradingBrainPage() {
           chunk_index: index,
           content: chunk,
           tags: tagsFor(chunk, source.metadata),
-          metadata: { scope: "global", source_title: source.title },
+          metadata: {
+            scope: "global",
+            source_title: source.title,
+            source_metadata: source.metadata,
+          },
         })),
       );
       const { error: chunkError } = await supabase.from("trading_knowledge_chunks").insert(chunks);

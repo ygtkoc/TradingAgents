@@ -1944,7 +1944,12 @@ SELECT
   0,
   s.content_text,
   ARRAY(SELECT jsonb_array_elements_text(COALESCE(s.metadata->'tags', '[]'::jsonb))),
-  jsonb_build_object('scope', 'global', 'source_title', s.title, 'seed', 'chart_pattern_knowledge_part1_2026_05_31')
+  jsonb_build_object(
+    'scope', 'global',
+    'source_title', s.title,
+    'source_metadata', s.metadata,
+    'seed', 'chart_pattern_knowledge_part1_2026_05_31'
+  )
 FROM inserted_sources s;
 
 WITH eligible AS (

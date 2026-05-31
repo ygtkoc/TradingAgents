@@ -514,7 +514,7 @@ class KnowledgeRepository:
                 self._client.table("trading_knowledge_chunks")
                 .select("id, source_id, content, tags, metadata")
                 .or_(f"user_id.is.null,user_id.eq.{user_id}")
-                .limit(50)
+                .limit(250)
                 .execute()
             )
 
