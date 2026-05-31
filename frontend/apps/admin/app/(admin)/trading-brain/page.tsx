@@ -1,11 +1,11 @@
 "use client";
 
 import { useMemo, useState } from "react";
-import { Badge, Button, Card, CardContent, CardDescription, CardHeader, CardTitle, Input } from "@ta/ui";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 
+import { Badge, Button, Card, CardContent, CardDescription, CardHeader, CardTitle, Input, PageHeader, ProductPage } from "@ta/ui";
+
 import { supabase } from "@/lib/supabase/client";
-import { useCurrentUser } from "@/lib/hooks/queries/use-current-user";
 
 const TAG_RULES: Array<[string, string[]]> = [
   ["risk", ["risk", "stop", "invalid", "rr", "reward", "loss"]],
@@ -20,37 +20,34 @@ const TAG_RULES: Array<[string, string[]]> = [
   ["position-sizing", ["size", "sizing", "position", "lot", "miktar"]],
 ];
 
-export default function TradingBrainPage() {
-  const { data: user } = useCurrentUser();
+export default function AdminTradingBrainPage() {
   const qc = useQueryClient();
   const [title, setTitle] = useState("");
   const [sourceType, setSourceType] = useState("note");
   const [content, setContent] = useState("");
 
   const sourcesQ = useQuery({
-    queryKey: ["trading-brain", "sources", user?.id],
-    enabled: !!user,
+    queryKey: ["admin", "trading-brain", "sources"],
     queryFn: async () => {
       const { data, error } = await supabase
         .from("trading_knowledge_sources")
-        .select("id,title,source_type,status,created_at")
+        .select("id,title,source_type,status,user_id,created_at")
         .order("created_at", { ascending: false })
-        .limit(30);
+        .limit(50);
       if (error) throw error;
       return data ?? [];
     },
   });
 
   const rulesQ = useQuery({
-    queryKey: ["trading-brain", "rules", user?.id],
-    enabled: !!user,
+    queryKey: ["admin", "trading-brain", "rules"],
     queryFn: async () => {
       const { data, error } = await supabase
         .from("trading_strategy_rules")
         .select("*")
         .eq("active", true)
         .order("created_at", { ascending: false })
-        .limit(80);
+        .limit(120);
       if (error) throw error;
       return data ?? [];
     },
@@ -58,19 +55,17 @@ export default function TradingBrainPage() {
 
   const importMutation = useMutation({
     mutationFn: async () => {
-      if (!user) throw new Error("Not signed in");
-      const cleanTitle = title.trim() || "Untitled trading note";
       const cleanContent = content.trim();
       if (cleanContent.length < 40) throw new Error("Content is too short.");
 
       const { data: source, error: sourceError } = await supabase
         .from("trading_knowledge_sources")
         .insert({
-          user_id: user.id,
-          title: cleanTitle,
+          user_id: null,
+          title: title.trim() || "Global trading knowledge",
           source_type: sourceType,
           content_text: cleanContent,
-          metadata: { imported_from: "customer_dashboard" },
+          metadata: { scope: "global", imported_from: "admin_panel" },
         })
         .select("id")
         .single();
@@ -78,67 +73,68 @@ export default function TradingBrainPage() {
 
       const chunks = chunkText(cleanContent).map((chunk, index) => ({
         source_id: source.id,
-        user_id: user.id,
+        user_id: null,
         chunk_index: index,
         content: chunk,
         tags: tagsFor(chunk),
+        metadata: { scope: "global" },
       }));
-
       const { error: chunkError } = await supabase.from("trading_knowledge_chunks").insert(chunks);
       if (chunkError) throw chunkError;
 
-      const extracted = extractRules(cleanContent).map((rule, index) => ({
-        user_id: user.id,
+      const rules = extractRules(cleanContent).map((rule, index) => ({
+        user_id: null,
         source_id: source.id,
-        rule_code: `user_${source.id.slice(0, 8)}_${index + 1}`,
+        rule_code: `global_${source.id.slice(0, 8)}_${index + 1}`,
         title: rule.title,
         rule_text: rule.text,
         category: rule.category,
         severity: rule.severity,
         weight: rule.weight,
-        metadata: { extracted_from: "heuristic_v1" },
+        metadata: { scope: "global", extracted_from: "admin_heuristic_v1" },
       }));
-      if (extracted.length) {
-        const { error: ruleError } = await supabase.from("trading_strategy_rules").insert(extracted);
+      if (rules.length) {
+        const { error: ruleError } = await supabase.from("trading_strategy_rules").insert(rules);
         if (ruleError) throw ruleError;
       }
     },
     onSuccess: () => {
       setTitle("");
       setContent("");
-      void qc.invalidateQueries({ queryKey: ["trading-brain"] });
+      void qc.invalidateQueries({ queryKey: ["admin", "trading-brain"] });
     },
   });
 
   const stats = useMemo(() => {
     const rules = rulesQ.data ?? [];
     return {
-      sources: sourcesQ.data?.length ?? 0,
+      globalSources: (sourcesQ.data ?? []).filter((row) => row.user_id == null).length,
       rules: rules.length,
-      critical: rules.filter((rule) => rule.severity === "critical").length,
+      critical: rules.filter((row) => row.severity === "critical" || row.severity === "high").length,
     };
   }, [rulesQ.data, sourcesQ.data]);
 
   return (
-    <div className="space-y-5">
-      <div>
-        <h1 className="text-2xl font-semibold tracking-[0] text-foreground">Trading Brain</h1>
-        <p className="mt-1 text-sm text-muted-foreground">
-          Import strategy material, extract rules, and let the execution gate critique every trade before it opens.
-        </p>
-      </div>
+    <ProductPage size="xl">
+      <PageHeader
+        eyebrow="Global intelligence"
+        title="Trading Brain"
+        description="Manage the central knowledge library, extracted strategy rules, and execution gate material used by every customer bot."
+      />
 
       <div className="grid gap-3 md:grid-cols-3">
-        <Stat label="Sources" value={String(stats.sources)} />
+        <Stat label="Global sources" value={String(stats.globalSources)} />
         <Stat label="Active rules" value={String(stats.rules)} />
-        <Stat label="Critical rules" value={String(stats.critical)} />
+        <Stat label="High impact rules" value={String(stats.critical)} />
       </div>
 
       <div className="grid gap-5 xl:grid-cols-[0.9fr_1.1fr]">
         <Card>
           <CardHeader>
-            <CardTitle>Import knowledge</CardTitle>
-            <CardDescription>Paste article text, notes, or a video transcript. v1 extracts deterministic rules and searchable chunks.</CardDescription>
+            <CardTitle>Import global knowledge</CardTitle>
+            <CardDescription>
+              Paste trading education, strategy rules, video transcript text, or post-trade lessons. These become global rules for all bots.
+            </CardDescription>
           </CardHeader>
           <CardContent className="space-y-3">
             <Input placeholder="Title" value={title} onChange={(event) => setTitle(event.target.value)} />
@@ -154,31 +150,34 @@ export default function TradingBrainPage() {
               <option value="post_trade">Post-trade lesson</option>
             </select>
             <textarea
-              className="min-h-64 font-mono text-xs"
-              placeholder="Paste trading education, strategy notes, risk rules, or transcript text..."
+              className="min-h-72 w-full rounded-md border border-border bg-background px-3 py-3 font-mono text-xs text-foreground outline-none placeholder:text-muted-foreground"
+              placeholder="Paste content here..."
               value={content}
               onChange={(event) => setContent(event.target.value)}
             />
             {importMutation.isError ? (
               <p className="text-sm text-destructive">{(importMutation.error as Error).message}</p>
             ) : null}
-            <Button disabled={importMutation.isPending} onClick={() => importMutation.mutate()} className="w-full">
-              {importMutation.isPending ? "Importing..." : "Import into Trading Brain"}
+            <Button className="w-full" disabled={importMutation.isPending} onClick={() => importMutation.mutate()}>
+              {importMutation.isPending ? "Importing..." : "Import globally"}
             </Button>
           </CardContent>
         </Card>
 
         <Card>
           <CardHeader>
-            <CardTitle>Active strategy rules</CardTitle>
-            <CardDescription>These rules are used by the execution knowledge gate.</CardDescription>
+            <CardTitle>Execution gate rules</CardTitle>
+            <CardDescription>Rules with no owner are global and apply to every customer execution.</CardDescription>
           </CardHeader>
-          <CardContent className="space-y-2">
+          <CardContent className="max-h-[620px] space-y-2 overflow-y-auto">
             {(rulesQ.data ?? []).map((rule) => (
               <div key={rule.id} className="rounded-lg border border-border/50 bg-card/50 p-3">
                 <div className="flex items-center justify-between gap-3">
                   <div className="font-semibold text-foreground">{rule.title}</div>
-                  <Badge variant={rule.severity === "critical" || rule.severity === "high" ? "destructive" : "secondary"}>{rule.severity}</Badge>
+                  <div className="flex items-center gap-2">
+                    {rule.user_id == null ? <Badge variant="success">global</Badge> : <Badge variant="secondary">user</Badge>}
+                    <Badge variant={rule.severity === "critical" || rule.severity === "high" ? "destructive" : "secondary"}>{rule.severity}</Badge>
+                  </div>
                 </div>
                 <p className="mt-1 text-xs leading-5 text-muted-foreground">{rule.rule_text}</p>
                 <div className="mt-2 text-[10px] font-bold uppercase tracking-[0.12em] text-muted-foreground/60">
@@ -192,18 +191,22 @@ export default function TradingBrainPage() {
 
       <Card>
         <CardHeader>
-          <CardTitle>Imported sources</CardTitle>
+          <CardTitle>Knowledge sources</CardTitle>
+          <CardDescription>Global sources are shared by all bot executions.</CardDescription>
         </CardHeader>
         <CardContent className="grid gap-2 md:grid-cols-2">
           {(sourcesQ.data ?? []).map((source) => (
             <div key={source.id} className="rounded-lg border border-border/50 bg-card/40 p-3">
-              <div className="font-semibold text-foreground">{source.title}</div>
+              <div className="flex items-center justify-between gap-2">
+                <div className="font-semibold text-foreground">{source.title}</div>
+                {source.user_id == null ? <Badge variant="success">global</Badge> : <Badge variant="secondary">user</Badge>}
+              </div>
               <div className="mt-1 text-xs text-muted-foreground">{source.source_type} / {new Date(source.created_at).toLocaleString()}</div>
             </div>
           ))}
         </CardContent>
       </Card>
-    </div>
+    </ProductPage>
   );
 }
 
@@ -231,7 +234,7 @@ function chunkText(value: string) {
     }
   }
   if (buffer) chunks.push(buffer);
-  return chunks.slice(0, 80);
+  return chunks.slice(0, 100);
 }
 
 function tagsFor(value: string) {
@@ -246,7 +249,7 @@ function extractRules(value: string) {
     .filter((item) => item.length > 28);
   return sentences
     .filter((sentence) => /(must|should|never|avoid|required|risk|stop|invalid|rr|tp|gerek|asla|kaçın|stop|risk)/i.test(sentence))
-    .slice(0, 12)
+    .slice(0, 18)
     .map((sentence) => {
       const tags = tagsFor(sentence);
       const category = tags[0] ?? "general";

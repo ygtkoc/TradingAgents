@@ -11,7 +11,14 @@ export default async function AdminShellLayout({ children }: { children: ReactNo
   } = await supabase.auth.getUser();
 
   const role = (user?.app_metadata?.role as string | undefined) ?? "user";
-  if (!user || role !== "admin") {
+  const profileResult = user
+    ? await supabase.from("profiles").select("role").eq("id", user.id).maybeSingle()
+    : { data: null };
+  const profile = profileResult.data as { role?: string } | null;
+  const profileRole = (profile?.role as string | undefined) ?? role;
+  const isAdminRole = ["admin", "super_admin", "security_admin"].includes(profileRole);
+
+  if (!user || !isAdminRole) {
     notFound();
   }
 
@@ -21,6 +28,7 @@ export default async function AdminShellLayout({ children }: { children: ReactNo
     ["Trades", "/trades"],
     ["Decisions", "/decisions"],
     ["Agent runs", "/agent-runs"],
+    ["Trading brain", "/trading-brain"],
     ["Reconciliation", "/reconciliation"],
     ["Security logs", "/logs/security"],
     ["Risk logs", "/logs/risk"],

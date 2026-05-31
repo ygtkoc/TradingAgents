@@ -4,7 +4,6 @@ import { cn } from "@ta/utils";
 import {
   Activity,
   Bell,
-  Brain,
   Bot,
   CandlestickChart,
   CircuitBoard,
@@ -47,7 +46,6 @@ const NAV_SECTIONS: { title: string; items: NavItem[] }[] = [
     title: "Intelligence",
     items: [
       { href: "/bots", label: "Agent fleet", icon: Bot },
-      { href: "/trading-brain", label: "Trading brain", icon: Brain },
       { href: "/decisions", label: "Decision ledger", icon: ListChecks },
       { href: "/telegram", label: "Signal intake", icon: Send },
       { href: "/notifications", label: "Event stream", icon: Bell },
