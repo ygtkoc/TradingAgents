@@ -47,6 +47,7 @@ type ExchangeAccount = {
 };
 
 type ManualAction = "set_stop_loss" | "set_take_profit" | "move_stop_to_entry" | "close_percent" | "close_full" | "reduce_quantity";
+type BotAction = "activate" | "pause" | "archive";
 
 const walletOptions: { key: WalletMode; label: string }[] = [
   { key: "paper", label: "Paper" },
@@ -381,6 +382,18 @@ export default function App() {
     await loadDashboard();
   }, [loadDashboard, manualPercent, manualPrice, manualQuantity, manualStop, manualTakeProfit, moves]);
 
+  const runBotAction = useCallback(async (bot: BotRow, action: BotAction) => {
+    setBusy(`bot-${action}-${bot.id}`);
+    const functionName = action === "activate" ? "bots-activate" : action === "pause" ? "bots-pause" : "bots-archive";
+    const { error } = await supabase.functions.invoke(functionName, { body: { bot_id: bot.id } });
+    setBusy(null);
+    if (error) {
+      Alert.alert("Bot action failed", error.message);
+      return;
+    }
+    await loadDashboard();
+  }, [loadDashboard]);
+
   useEffect(() => {
     if (selectedTrade) {
       const current = moveForTrade(selectedTrade, moves)?.lastPrice ?? entryPrice(selectedTrade);
@@ -548,7 +561,13 @@ export default function App() {
         {activeTab === "bots" ? (
           <View style={styles.stack}>
             {bots.map((bot) => (
-              <BotCard key={bot.id} bot={bot} move={bot.symbol ? moves[normalizeMarketSymbol(bot.symbol)] : undefined} />
+              <BotCard
+                key={bot.id}
+                bot={bot}
+                busy={busy}
+                move={bot.symbol ? moves[normalizeMarketSymbol(bot.symbol)] : undefined}
+                onAction={runBotAction}
+              />
             ))}
           </View>
         ) : null}
@@ -705,7 +724,17 @@ function TradeCard({ move, onPress, trade }: { trade: TradeRow; move?: MarketMov
   );
 }
 
-function BotCard({ bot, move }: { bot: BotRow; move?: MarketMove }) {
+function BotCard({
+  bot,
+  busy,
+  move,
+  onAction,
+}: {
+  bot: BotRow;
+  busy: string | null;
+  move?: MarketMove;
+  onAction: (bot: BotRow, action: BotAction) => void;
+}) {
   const isRunning = bot.status === "running" || bot.status === "active";
   const isPositiveMove = (move?.change24h ?? 0) >= 0;
 
@@ -724,6 +753,27 @@ function BotCard({ bot, move }: { bot: BotRow; move?: MarketMove }) {
           <Text style={isPositiveMove ? styles.goodText : styles.badText}>{percent(move?.change24h)} 24h</Text>
         </View>
       ) : null}
+      <View style={styles.actionWrap}>
+        <ActionButton
+          disabled={isRunning}
+          label="Start"
+          busy={busy === `bot-activate-${bot.id}`}
+          onPress={() => onAction(bot, "activate")}
+        />
+        <ActionButton
+          disabled={!isRunning}
+          label="Pause"
+          busy={busy === `bot-pause-${bot.id}`}
+          onPress={() => onAction(bot, "pause")}
+        />
+        <ActionButton
+          disabled={false}
+          label="Archive"
+          busy={busy === `bot-archive-${bot.id}`}
+          onPress={() => onAction(bot, "archive")}
+          tone="danger"
+        />
+      </View>
     </View>
   );
 }
