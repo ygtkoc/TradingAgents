@@ -6,8 +6,9 @@ import {
 } from "@ta/ui";
 import { cn, formatCurrency, formatDateTime, formatRelative } from "@ta/utils";
 import {
-  ArrowLeft, Bot, Brain, ChevronRight, Clock, Shield, ShieldAlert,
+  ArrowLeft, Bot, Brain, Check, ChevronRight, Clock, Shield, ShieldAlert,
   ShieldCheck, Sparkles, Target, TrendingUp, Zap,
+  X,
 } from "lucide-react";
 import type { Trade, TradeDecision } from "@ta/types";
 import Link from "next/link";
@@ -20,6 +21,7 @@ import {
   getDecisionReasoning, getDecisionScore,
 } from "@/lib/decisions/summary";
 import { formatPrice } from "@/lib/format-price";
+import { useDecisionMutations } from "@/lib/hooks/mutations/use-decision-mutations";
 import {
   useAgentOutputs, useDecisionAgentRuns, useSignal,
   useTradeEventsForDecision, useTradeForDecision,
@@ -202,6 +204,7 @@ export default function DecisionDetailPage() {
   const outputsQ   = useAgentOutputs(primaryRun?.id ?? null);
   const tradeQ     = useTradeForDecision(decisionId);
   const eventsQ    = useTradeEventsForDecision(decisionId);
+  const decisionMutations = useDecisionMutations();
 
   useEffect(() => {
     if (decisionQ.isError)
@@ -374,6 +377,14 @@ export default function DecisionDetailPage() {
       />
       <DecisionTakeProfitPlanCard decision={decision} trade={tradeQ.data ?? null} />
 
+      <DecisionApprovalPanel
+        decision={decision}
+        approvePending={decisionMutations.approve.isPending}
+        rejectPending={decisionMutations.reject.isPending}
+        onApprove={() => decisionMutations.approve.mutate(decision.id)}
+        onReject={(reason) => decisionMutations.reject.mutate({ decisionId: decision.id, reason })}
+      />
+
       <div>
         <div className="mb-3 flex items-center gap-2">
           <h2 className="text-[15px] font-semibold text-foreground">Agent votes</h2>
@@ -507,6 +518,64 @@ export default function DecisionDetailPage() {
 }
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
+
+function DecisionApprovalPanel({
+  approvePending,
+  decision,
+  onApprove,
+  onReject,
+  rejectPending,
+}: {
+  approvePending: boolean;
+  decision: TradeDecision;
+  onApprove: () => void;
+  onReject: (reason: string) => void;
+  rejectPending: boolean;
+}) {
+  const isActionableOpen = decision.final_decision === "open_long" || decision.final_decision === "open_short";
+  const isPending = decision.approval_status === "pending" && (decision.manual_approval_required || isActionableOpen);
+  const busy = approvePending || rejectPending;
+
+  if (!isPending) return null;
+
+  return (
+    <Card className="border-warning/25 bg-warning/5">
+      <CardHeader>
+        <CardTitle className="flex items-center gap-2">
+          <ShieldAlert className="h-4 w-4 text-warning" />
+          Manual approval required
+        </CardTitle>
+        <CardDescription>
+          This decision is waiting for operator approval before the execution engine can claim it.
+        </CardDescription>
+      </CardHeader>
+      <CardContent className="flex flex-wrap gap-2">
+        <Button
+          type="button"
+          className="gap-2"
+          disabled={busy}
+          onClick={onApprove}
+        >
+          <Check className="h-4 w-4" />
+          {approvePending ? "Approving..." : "Approve"}
+        </Button>
+        <Button
+          type="button"
+          variant="outline"
+          className="gap-2 border-destructive/30 text-destructive hover:bg-destructive/10"
+          disabled={busy}
+          onClick={() => {
+            const reason = window.prompt("Reason for rejection?")?.trim();
+            if (reason) onReject(reason);
+          }}
+        >
+          <X className="h-4 w-4" />
+          {rejectPending ? "Rejecting..." : "Reject"}
+        </Button>
+      </CardContent>
+    </Card>
+  );
+}
 
 function DecisionExecutionPanel({
   decision,

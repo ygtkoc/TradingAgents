@@ -24,11 +24,12 @@ export async function fetchMarketMoves(symbols: string[]) {
         throw new Error(`Ticker failed for ${symbol}`);
       }
 
-      const row = (await response.json()) as { priceChangePercent?: string };
+      const row = (await response.json()) as { priceChangePercent?: string; lastPrice?: string };
 
       return {
         symbol,
         change24h: Number(row.priceChangePercent ?? 0),
+        lastPrice: Number(row.lastPrice ?? 0),
       };
     }),
   );
