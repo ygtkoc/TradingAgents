@@ -1,11 +1,12 @@
 import { StatusBar } from "expo-status-bar";
-import React, { useCallback, useEffect, useMemo, useState } from "react";
+import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   ActivityIndicator,
   Alert,
   Animated,
   Easing,
   KeyboardAvoidingView,
+  PanResponder,
   Platform,
   Pressable,
   RefreshControl,
@@ -22,12 +23,13 @@ import { label, minutesAgo, percent, rMultiple, scoreFromSummary } from "./src/l
 import { fetchMarketMoves, normalizeMarketSymbol } from "./src/lib/market";
 import type { BotRow, DecisionRow, MarketMove, SessionStatus, TradeRow } from "./src/types";
 
-type Tab = "overview" | "decisions" | "positions" | "bots" | "paper" | "account";
+type Tab = "overview" | "decisions" | "positions" | "markets" | "bots" | "paper" | "account";
 type WalletMode = "paper" | "binance" | "bybit" | "okx";
 type Screen =
   | { name: "home" }
   | { name: "decision"; id: string }
-  | { name: "trade"; id: string };
+  | { name: "trade"; id: string }
+  | { name: "bot"; id: string };
 
 type PaperAccount = {
   starting_balance: number;
@@ -43,13 +45,16 @@ type PaperAccount = {
 type ExchangeAccount = {
   id: string;
   exchange?: string | null;
+  exchange_name?: string | null;
   label?: string | null;
+  account_label?: string | null;
   is_active?: boolean | null;
   can_trade?: boolean | null;
+  connection_status?: string | null;
 };
 
 type ManualAction = "set_stop_loss" | "set_take_profit" | "move_stop_to_entry" | "close_percent" | "close_full" | "reduce_quantity";
-type BotAction = "activate" | "pause" | "archive";
+type BotAction = "activate" | "pause" | "stop" | "archive";
 
 const walletOptions: { key: WalletMode; label: string }[] = [
   { key: "paper", label: "Paper" },
@@ -158,6 +163,7 @@ const tabs: { key: Tab; label: string }[] = [
   { key: "overview", label: "Home" },
   { key: "decisions", label: "Decisions" },
   { key: "positions", label: "Positions" },
+  { key: "markets", label: "Markets" },
   { key: "bots", label: "Bots" },
   { key: "paper", label: "Paper" },
   { key: "account", label: "Account" },
@@ -181,6 +187,16 @@ export default function App() {
   const [manualPercent, setManualPercent] = useState("50");
   const [manualStop, setManualStop] = useState("");
   const [manualTakeProfit, setManualTakeProfit] = useState("");
+  const [drawerOpen, setDrawerOpen] = useState(false);
+  const [profileOpen, setProfileOpen] = useState(false);
+  const [binanceLabel, setBinanceLabel] = useState("Binance main");
+  const [binanceKey, setBinanceKey] = useState("");
+  const [binanceSecret, setBinanceSecret] = useState("");
+  const [marketSymbol, setMarketSymbol] = useState("BTCUSDT");
+  const [marketDirection, setMarketDirection] = useState<"long" | "short">("long");
+  const [marketEntry, setMarketEntry] = useState("");
+  const [marketStop, setMarketStop] = useState("");
+  const [marketRisk, setMarketRisk] = useState("1");
   const [decisions, setDecisions] = useState<DecisionRow[]>(fallbackDecisions);
   const [trades, setTrades] = useState<TradeRow[]>(fallbackTrades);
   const [bots, setBots] = useState<BotRow[]>(fallbackBots);
@@ -188,16 +204,52 @@ export default function App() {
   const [exchanges, setExchanges] = useState<ExchangeAccount[]>([]);
   const [moves, setMoves] = useState<Record<string, MarketMove>>(fallbackMoves);
   const [routeAnim] = useState(() => new Animated.Value(1));
+  const drawerX = useRef(new Animated.Value(-310)).current;
+  const profileX = useRef(new Animated.Value(310)).current;
 
   useEffect(() => {
     routeAnim.setValue(0);
     Animated.timing(routeAnim, {
       toValue: 1,
-      duration: 240,
-      easing: Easing.out(Easing.cubic),
+      duration: 320,
+      easing: Easing.bezier(0.16, 1, 0.3, 1),
       useNativeDriver: true,
     }).start();
   }, [activeTab, routeAnim, screen]);
+
+  useEffect(() => {
+    Animated.spring(drawerX, {
+      toValue: drawerOpen ? 0 : -310,
+      damping: 24,
+      stiffness: 190,
+      mass: 0.9,
+      useNativeDriver: true,
+    }).start();
+  }, [drawerOpen, drawerX]);
+
+  useEffect(() => {
+    Animated.spring(profileX, {
+      toValue: profileOpen ? 0 : 310,
+      damping: 24,
+      stiffness: 190,
+      mass: 0.9,
+      useNativeDriver: true,
+    }).start();
+  }, [profileOpen, profileX]);
+
+  const panResponder = useMemo(
+    () => PanResponder.create({
+      onMoveShouldSetPanResponder: (_, gesture) => Math.abs(gesture.dx) > 24 && Math.abs(gesture.dy) < 18,
+      onPanResponderRelease: (_, gesture) => {
+        if (gesture.dx > 70) setDrawerOpen(true);
+        if (gesture.dx < -70) {
+          setDrawerOpen(false);
+          setProfileOpen(false);
+        }
+      },
+    }),
+    [],
+  );
 
   useEffect(() => {
     if (!hasSupabaseEnv) {
@@ -247,14 +299,14 @@ export default function App() {
         .limit(50),
       supabase
         .from("bots")
-        .select("id,user_id,name,status,mode,symbol,updated_at,created_at")
+        .select("id,user_id,name,status,mode,symbol,updated_at,created_at,is_archived")
         .eq("user_id", userId)
         .order("created_at", { ascending: false })
-        .limit(20),
+        .limit(200),
       supabase.from("paper_accounts").select("*").eq("user_id", userId).maybeSingle(),
       supabase
         .from("exchange_accounts")
-        .select("id,exchange,label,is_active,can_trade")
+        .select("id,exchange_name,account_label,connection_status,is_active,can_trade")
         .eq("user_id", userId)
         .order("created_at", { ascending: false }),
     ]);
@@ -320,6 +372,7 @@ export default function App() {
   const navigateHome = useCallback(() => setScreen({ name: "home" }), []);
   const openDecision = useCallback((id: string) => setScreen({ name: "decision", id }), []);
   const openTrade = useCallback((id: string) => setScreen({ name: "trade", id }), []);
+  const openBot = useCallback((id: string) => setScreen({ name: "bot", id }), []);
 
   const resetPaperAccount = useCallback(() => {
     Alert.alert(
@@ -369,9 +422,9 @@ export default function App() {
     opacity: routeAnim,
     transform: [
       {
-        translateY: routeAnim.interpolate({
+        translateX: routeAnim.interpolate({
           inputRange: [0, 1],
-          outputRange: [16, 0],
+          outputRange: [18, 0],
         }),
       },
     ],
@@ -379,6 +432,7 @@ export default function App() {
 
   const selectedDecision = screen.name === "decision" ? decisions.find((decision) => decision.id === screen.id) : null;
   const selectedTrade = screen.name === "trade" ? trades.find((trade) => trade.id === screen.id) : null;
+  const selectedBot = screen.name === "bot" ? bots.find((bot) => bot.id === screen.id) : null;
 
   const walletTrades = useMemo(() => {
     if (wallet === "paper") {
@@ -472,8 +526,9 @@ export default function App() {
 
   const runBotAction = useCallback(async (bot: BotRow, action: BotAction) => {
     setBusy(`bot-${action}-${bot.id}`);
-    const functionName = action === "activate" ? "bots-activate" : action === "pause" ? "bots-pause" : "bots-archive";
-    const { error } = await supabase.functions.invoke(functionName, { body: { bot_id: bot.id } });
+    const functionName = action === "activate" ? "bots-activate" : action === "pause" ? "bots-pause" : action === "archive" ? "bots-archive" : "bot-control";
+    const body = action === "stop" ? { bot_id: bot.id, action: "stop" } : { bot_id: bot.id };
+    const { error } = await supabase.functions.invoke(functionName, { body });
     setBusy(null);
     if (error) {
       Alert.alert("Bot action failed", error.message);
@@ -481,6 +536,91 @@ export default function App() {
     }
     await loadDashboard();
   }, [loadDashboard]);
+
+  const connectBinance = useCallback(async () => {
+    if (!binanceKey.trim() || !binanceSecret.trim()) {
+      Alert.alert("Binance key required", "API key and secret are required.");
+      return;
+    }
+    setBusy("connect-binance");
+    const { error } = await supabase.functions.invoke("store-exchange-api-key", {
+      body: {
+        exchange_name: "binance",
+        account_label: binanceLabel.trim() || "Binance main",
+        api_key: binanceKey.trim(),
+        api_secret: binanceSecret.trim(),
+        testnet: false,
+      },
+    });
+    setBusy(null);
+    if (error) {
+      Alert.alert("Binance connection failed", error.message);
+      return;
+    }
+    setBinanceKey("");
+    setBinanceSecret("");
+    await loadDashboard();
+  }, [binanceKey, binanceLabel, binanceSecret, loadDashboard]);
+
+  const submitMarketOrder = useCallback(async () => {
+    const entry = parseNumber(marketEntry);
+    const stop = parseNumber(marketStop);
+    const riskPct = parseNumber(marketRisk) ?? 1;
+    if (!entry || !stop || entry === stop) {
+      Alert.alert("Entry and stop required", "Enter a valid entry and stop. TP levels are derived from the 1R distance.");
+      return;
+    }
+    const symbol = marketSymbol.trim().toUpperCase();
+    if (!symbol) {
+      Alert.alert("Symbol required", "Example: BTCUSDT");
+      return;
+    }
+    const isShort = marketDirection === "short";
+    const r = Math.abs(entry - stop);
+    const takeProfit = isShort ? entry - r * 3 : entry + r * 3;
+    setBusy("market-order");
+    const userResult = await supabase.auth.getUser();
+    const userId = userResult.data.user?.id;
+    if (!userId) {
+      setBusy(null);
+      Alert.alert("Not signed in", "Please sign in again.");
+      return;
+    }
+    const { error } = await supabase.from("trade_decisions").insert({
+      user_id: userId,
+      symbol,
+      direction: marketDirection,
+      mode: wallet === "paper" ? "paper" : "live",
+      final_decision: isShort ? "open_short" : "open_long",
+      approval_status: "approved",
+      execution_status: "pending_execution",
+      manual_approval_required: false,
+      score_summary: { source: "mobile_markets", aggregated_score: 100 },
+      risk_summary: {
+        source: "mobile_markets",
+        entry_price: entry,
+        stop_loss: stop,
+        take_profit: takeProfit,
+        risk_percent: riskPct,
+        reward_plan: {
+          levels: [1, 2, 3].map((multiple, index) => ({
+            target_price: isShort ? entry - r * multiple : entry + r * multiple,
+            r_multiple: multiple,
+            size_pct: index === 2 ? 34 : 33,
+          })),
+        },
+      },
+      security_summary: { verdict: "manual_mobile_order" },
+      metadata: { source: "mobile_markets", selected_wallet: wallet },
+    });
+    setBusy(null);
+    if (error) {
+      Alert.alert("Order request failed", error.message);
+      return;
+    }
+    await loadDashboard();
+    setActiveTab("decisions");
+  }, [loadDashboard, marketDirection, marketEntry, marketRisk, marketStop, marketSymbol, wallet]);
 
   useEffect(() => {
     if (selectedTrade) {
@@ -589,8 +729,16 @@ export default function App() {
     );
   }
 
+  if (selectedBot) {
+    return (
+      <Shell title={selectedBot.name} subtitle="Bot detail" onBack={navigateHome} transitionStyle={transitionStyle}>
+        <BotDetail bot={selectedBot} busy={busy} onAction={runBotAction} trades={trades.filter((trade) => trade.bot_id === selectedBot.id)} />
+      </Shell>
+    );
+  }
+
   return (
-    <SafeAreaView style={styles.safeArea}>
+    <SafeAreaView style={styles.safeArea} {...panResponder.panHandlers}>
       <StatusBar style="light" />
       <Animated.ScrollView
         contentContainerStyle={styles.content}
@@ -598,13 +746,21 @@ export default function App() {
         style={transitionStyle}
       >
         <View style={styles.header}>
+          <Pressable onPress={() => setDrawerOpen(true)} style={styles.iconButton}>
+            <Text style={styles.iconButtonText}>M</Text>
+          </Pressable>
           <View style={styles.headerCopy}>
             <Text style={styles.kicker}>Lucrandos AI trading OS</Text>
             <Text style={styles.heading}>Command</Text>
           </View>
-          <Pressable onPress={signOut} style={styles.ghostButton}>
-            <Text style={styles.ghostButtonText}>Sign out</Text>
-          </Pressable>
+          <View style={styles.headerActions}>
+            <Pressable onPress={() => Alert.alert("Notifications", "Notification center is ready for trade alerts.")} style={styles.iconButton}>
+              <Text style={styles.iconButtonText}>N</Text>
+            </Pressable>
+            <Pressable onPress={() => setProfileOpen(true)} style={styles.profileButton}>
+              <Text style={styles.profileButtonText}>{(accountEmail || email || "L").slice(0, 1).toUpperCase()}</Text>
+            </Pressable>
+          </View>
         </View>
 
         <WalletSelector exchanges={exchanges} selected={wallet} setSelected={setWallet} />
@@ -641,6 +797,24 @@ export default function App() {
           </View>
         ) : null}
 
+        {activeTab === "markets" ? (
+          <MarketsPanel
+            busy={busy}
+            direction={marketDirection}
+            entry={marketEntry}
+            onSubmit={submitMarketOrder}
+            risk={marketRisk}
+            setDirection={setMarketDirection}
+            setEntry={setMarketEntry}
+            setRisk={setMarketRisk}
+            setStop={setMarketStop}
+            setSymbol={setMarketSymbol}
+            stop={marketStop}
+            symbol={marketSymbol}
+            wallet={wallet}
+          />
+        ) : null}
+
         {activeTab === "bots" ? (
           <View style={styles.stack}>
             {bots.map((bot) => (
@@ -650,6 +824,7 @@ export default function App() {
                 busy={busy}
                 move={bot.symbol ? moves[normalizeMarketSymbol(bot.symbol)] : undefined}
                 onAction={runBotAction}
+                onPress={() => openBot(bot.id)}
               />
             ))}
           </View>
@@ -666,9 +841,40 @@ export default function App() {
         ) : null}
 
         {activeTab === "account" ? (
-          <AccountPanel email={accountEmail || email} exchanges={exchanges} onSignOut={signOut} paperAccount={paperAccount} />
+          <AccountPanel
+            binanceKey={binanceKey}
+            binanceLabel={binanceLabel}
+            binanceSecret={binanceSecret}
+            busy={busy}
+            email={accountEmail || email}
+            exchanges={exchanges}
+            onConnectBinance={connectBinance}
+            onSignOut={signOut}
+            paperAccount={paperAccount}
+            setBinanceKey={setBinanceKey}
+            setBinanceLabel={setBinanceLabel}
+            setBinanceSecret={setBinanceSecret}
+          />
         ) : null}
       </Animated.ScrollView>
+      <SideMenu
+        activeTab={activeTab}
+        close={() => setDrawerOpen(false)}
+        drawerX={drawerX}
+        open={drawerOpen}
+        setTab={(tab) => {
+          setActiveTab(tab);
+          setScreen({ name: "home" });
+          setDrawerOpen(false);
+        }}
+      />
+      <ProfileMenu
+        close={() => setProfileOpen(false)}
+        email={accountEmail || email}
+        onSignOut={signOut}
+        open={profileOpen}
+        profileX={profileX}
+      />
     </SafeAreaView>
   );
 }
@@ -841,15 +1047,31 @@ function PaperControls({
 }
 
 function AccountPanel({
+  binanceKey,
+  binanceLabel,
+  binanceSecret,
+  busy,
   email,
   exchanges,
+  onConnectBinance,
   onSignOut,
   paperAccount,
+  setBinanceKey,
+  setBinanceLabel,
+  setBinanceSecret,
 }: {
+  binanceKey: string;
+  binanceLabel: string;
+  binanceSecret: string;
+  busy: string | null;
   email: string;
   exchanges: ExchangeAccount[];
+  onConnectBinance: () => void;
   onSignOut: () => void;
   paperAccount: PaperAccount | null;
+  setBinanceKey: (value: string) => void;
+  setBinanceLabel: (value: string) => void;
+  setBinanceSecret: (value: string) => void;
 }) {
   return (
     <View style={styles.stack}>
@@ -876,14 +1098,25 @@ function AccountPanel({
         {exchanges.length ? (
           exchanges.map((exchange) => (
             <View key={exchange.id} style={styles.tpRow}>
-              <Text style={styles.symbolSmall}>{exchange.label || label(exchange.exchange)}</Text>
-              <Text style={styles.muted}>{exchange.can_trade ? "Trading enabled" : "Read only"}</Text>
+              <Text style={styles.symbolSmall}>{exchange.account_label || exchange.label || label(exchange.exchange_name ?? exchange.exchange)}</Text>
+              <Text style={styles.muted}>{label(exchange.connection_status ?? "")} / {exchange.can_trade ? "Trading enabled" : "Read only"}</Text>
               <View style={[styles.dot, exchange.is_active ? styles.dotGood : styles.dotMuted]} />
             </View>
           ))
         ) : (
-          <Text style={styles.muted}>Only Paper is active. Add exchange keys from the web dashboard when ready.</Text>
+          <Text style={styles.muted}>Only Paper is active. Add Binance read/trade keys below.</Text>
         )}
+      </View>
+
+      <View style={styles.card}>
+        <SectionTitle title="Connect Binance" value="spot keys" />
+        <Field label="Label" value={binanceLabel} onChangeText={setBinanceLabel} />
+        <Field label="API key" value={binanceKey} onChangeText={setBinanceKey} />
+        <Field label="API secret" value={binanceSecret} onChangeText={setBinanceSecret} />
+        <Text style={styles.warning}>Withdrawal-enabled keys are rejected automatically. Use read/trade permissions only.</Text>
+        <Pressable disabled={busy === "connect-binance"} onPress={onConnectBinance} style={styles.primaryButton}>
+          <Text style={styles.primaryButtonText}>{busy === "connect-binance" ? "Connecting..." : "Connect Binance"}</Text>
+        </Pressable>
       </View>
 
       <Pressable onPress={onSignOut} style={styles.ghostButtonWide}>
@@ -895,6 +1128,162 @@ function AccountPanel({
 
 function usePortfolioShape() {
   return { equity: 0, available: null as number | null, reserved: null as number | null, realized: 0, livePnl: 0, pnlPct: 0, openCount: 0 };
+}
+
+function MarketsPanel({
+  busy,
+  direction,
+  entry,
+  onSubmit,
+  risk,
+  setDirection,
+  setEntry,
+  setRisk,
+  setStop,
+  setSymbol,
+  stop,
+  symbol,
+  wallet,
+}: {
+  busy: string | null;
+  direction: "long" | "short";
+  entry: string;
+  onSubmit: () => void;
+  risk: string;
+  setDirection: (value: "long" | "short") => void;
+  setEntry: (value: string) => void;
+  setRisk: (value: string) => void;
+  setStop: (value: string) => void;
+  setSymbol: (value: string) => void;
+  stop: string;
+  symbol: string;
+  wallet: WalletMode;
+}) {
+  const entryNum = parseNumber(entry);
+  const stopNum = parseNumber(stop);
+  const r = entryNum && stopNum ? Math.abs(entryNum - stopNum) : 0;
+  const levels = entryNum && r > 0
+    ? [1, 2, 3].map((multiple) => direction === "short" ? entryNum - r * multiple : entryNum + r * multiple)
+    : [];
+
+  return (
+    <View style={styles.stack}>
+      <View style={styles.card}>
+        <SectionTitle title="Markets" value={label(wallet)} />
+        <Field label="Symbol" value={symbol} onChangeText={setSymbol} />
+        <View style={styles.actionRow}>
+          <Pressable onPress={() => setDirection("long")} style={[styles.actionButton, direction === "long" && styles.actionButtonActive]}>
+            <Text style={styles.actionButtonText}>Long</Text>
+          </Pressable>
+          <Pressable onPress={() => setDirection("short")} style={[styles.actionButton, direction === "short" && styles.actionButtonActive]}>
+            <Text style={styles.actionButtonText}>Short</Text>
+          </Pressable>
+        </View>
+        <Field decimal label="Entry" value={entry} onChangeText={setEntry} />
+        <Field decimal label="Stop" value={stop} onChangeText={setStop} />
+        <Field decimal label="Risk %" value={risk} onChangeText={setRisk} />
+        {levels.length ? (
+          <View style={styles.detailGrid}>
+            {levels.map((tp, index) => <Metric key={index} label={`TP${index + 1}`} value={formatPrice(tp)} />)}
+          </View>
+        ) : null}
+        <Pressable disabled={busy === "market-order"} onPress={onSubmit} style={styles.primaryButton}>
+          <Text style={styles.primaryButtonText}>{busy === "market-order" ? "Sending..." : `Create ${label(wallet)} order request`}</Text>
+        </Pressable>
+      </View>
+    </View>
+  );
+}
+
+function BotDetail({ bot, busy, onAction, trades }: { bot: BotRow; busy: string | null; onAction: (bot: BotRow, action: BotAction) => void; trades: TradeRow[] }) {
+  const isRunning = bot.status === "running" || bot.status === "active";
+  const open = trades.filter(isTradeOpen);
+  const pnl = trades.reduce((sum, trade) => sum + toNumber(trade.realized_pnl ?? trade.unrealized_pnl), 0);
+  return (
+    <View style={styles.stack}>
+      <View style={styles.card}>
+        <View style={styles.rowBetween}>
+          <View>
+            <Text style={styles.symbol}>{bot.name}</Text>
+            <Text style={styles.meta}>{bot.symbol ?? "MULTI"} / {label(bot.mode)} / {label(bot.status)}</Text>
+          </View>
+          <Badge tone={isRunning ? "good" : "neutral"}>{label(bot.status)}</Badge>
+        </View>
+        <View style={styles.detailGrid}>
+          <Metric label="Open" value={String(open.length)} />
+          <Metric label="P&L" value={currency(pnl)} />
+          <Metric label="Archived" value={bot.is_archived ? "Yes" : "No"} />
+        </View>
+        <View style={styles.actionWrap}>
+          <ActionButton disabled={isRunning} label="Start" busy={busy === `bot-activate-${bot.id}`} onPress={() => onAction(bot, "activate")} />
+          <ActionButton disabled={!isRunning} label="Pause" busy={busy === `bot-pause-${bot.id}`} onPress={() => onAction(bot, "pause")} />
+          <ActionButton disabled={!isRunning} label="Stop" busy={busy === `bot-stop-${bot.id}`} onPress={() => onAction(bot, "stop")} />
+          <ActionButton disabled={false} label="Delete" busy={busy === `bot-archive-${bot.id}`} onPress={() => onAction(bot, "archive")} tone="danger" />
+        </View>
+      </View>
+      <View style={styles.card}>
+        <SectionTitle title="Bot positions" value={`${trades.length} total`} />
+        {trades.slice(0, 8).map((trade) => (
+          <View key={trade.id} style={styles.tpRow}>
+            <Text style={styles.symbolSmall}>{trade.symbol}</Text>
+            <Text style={styles.muted}>{label(trade.direction)} / {label(trade.status)}</Text>
+            <Text style={toNumber(trade.realized_pnl ?? trade.unrealized_pnl) >= 0 ? styles.goodText : styles.badText}>
+              {currency(toNumber(trade.realized_pnl ?? trade.unrealized_pnl))}
+            </Text>
+          </View>
+        ))}
+      </View>
+    </View>
+  );
+}
+
+function SideMenu({
+  activeTab,
+  close,
+  drawerX,
+  open,
+  setTab,
+}: {
+  activeTab: Tab;
+  close: () => void;
+  drawerX: Animated.Value;
+  open: boolean;
+  setTab: (tab: Tab) => void;
+}) {
+  if (!open) return null;
+  return (
+    <View style={styles.overlay}>
+      <Pressable style={styles.overlayBackdrop} onPress={close} />
+      <Animated.View style={[styles.sideDrawer, { transform: [{ translateX: drawerX }] }]}>
+        <Text style={styles.kicker}>Lucrandos</Text>
+        <Text style={styles.headingSmall}>Menu</Text>
+        {tabs.map((tab) => (
+          <Pressable key={tab.key} onPress={() => setTab(tab.key)} style={[styles.drawerItem, activeTab === tab.key && styles.drawerItemActive]}>
+            <Text style={styles.drawerItemText}>{tab.label}</Text>
+          </Pressable>
+        ))}
+      </Animated.View>
+    </View>
+  );
+}
+
+function ProfileMenu({ close, email, onSignOut, open, profileX }: { close: () => void; email: string; onSignOut: () => void; open: boolean; profileX: Animated.Value }) {
+  if (!open) return null;
+  return (
+    <View style={styles.overlay}>
+      <Pressable style={styles.overlayBackdrop} onPress={close} />
+      <Animated.View style={[styles.profileDrawer, { transform: [{ translateX: profileX }] }]}>
+        <View style={styles.profileAvatar}>
+          <Text style={styles.profileButtonText}>{(email || "L").slice(0, 1).toUpperCase()}</Text>
+        </View>
+        <Text style={styles.symbol}>Profile</Text>
+        <Text style={styles.meta}>{email || "Signed in"}</Text>
+        <Pressable onPress={onSignOut} style={styles.ghostButtonWide}>
+          <Text style={styles.ghostButtonText}>Sign out</Text>
+        </Pressable>
+      </Animated.View>
+    </View>
+  );
 }
 
 function Metric({ label: metricLabel, value }: { label: string; value: string }) {
@@ -949,7 +1338,10 @@ function TradeCard({ move, onPress, trade }: { trade: TradeRow; move?: MarketMov
     <Pressable onPress={onPress} style={styles.card}>
       <View style={styles.rowBetween}>
         <View style={styles.cardMain}>
-          <Text style={styles.symbol}>{trade.symbol}</Text>
+          <View style={styles.inlineTitle}>
+            <Text style={styles.symbol}>{trade.symbol}</Text>
+            <Badge tone={String(trade.direction).toLowerCase() === "short" ? "bad" : "good"}>{label(trade.direction ?? "--")}</Badge>
+          </View>
           <Text style={styles.meta}>{label(trade.status)} / {label(trade.lifecycle_status ?? trade.close_reason)} / {minutesAgo(trade.closed_at ?? trade.created_at)} ago</Text>
         </View>
         <View style={styles.alignRight}>
@@ -970,17 +1362,19 @@ function BotCard({
   busy,
   move,
   onAction,
+  onPress,
 }: {
   bot: BotRow;
   busy: string | null;
   move?: MarketMove;
   onAction: (bot: BotRow, action: BotAction) => void;
+  onPress: () => void;
 }) {
   const isRunning = bot.status === "running" || bot.status === "active";
   const isPositiveMove = (move?.change24h ?? 0) >= 0;
 
   return (
-    <View style={styles.card}>
+    <Pressable onPress={onPress} style={styles.card}>
       <View style={styles.rowBetween}>
         <View style={styles.cardMain}>
           <Text style={styles.symbol}>{bot.name}</Text>
@@ -1008,14 +1402,20 @@ function BotCard({
           onPress={() => onAction(bot, "pause")}
         />
         <ActionButton
+          disabled={!isRunning}
+          label="Stop"
+          busy={busy === `bot-stop-${bot.id}`}
+          onPress={() => onAction(bot, "stop")}
+        />
+        <ActionButton
           disabled={false}
-          label="Archive"
+          label="Delete"
           busy={busy === `bot-archive-${bot.id}`}
           onPress={() => onAction(bot, "archive")}
           tone="danger"
         />
       </View>
-    </View>
+    </Pressable>
   );
 }
 
@@ -1159,11 +1559,11 @@ function TradeDetail({
           <Text style={styles.warning}>Live market close/add/reduce stays locked here. Protective levels can be edited.</Text>
         ) : null}
         <View style={styles.formGrid}>
-          <Field label="Price" value={manualPrice} onChangeText={setManualPrice} />
-          <Field label="Quantity" value={manualQuantity} onChangeText={setManualQuantity} />
-          <Field label="Percent" value={manualPercent} onChangeText={setManualPercent} />
-          <Field label="Stop" value={manualStop} onChangeText={setManualStop} />
-          <Field label="Take profit" value={manualTakeProfit} onChangeText={setManualTakeProfit} />
+          <Field decimal label="Price" value={manualPrice} onChangeText={setManualPrice} />
+          <Field decimal label="Quantity" value={manualQuantity} onChangeText={setManualQuantity} />
+          <Field decimal label="Percent" value={manualPercent} onChangeText={setManualPercent} />
+          <Field decimal label="Stop" value={manualStop} onChangeText={setManualStop} />
+          <Field decimal label="Take profit" value={manualTakeProfit} onChangeText={setManualTakeProfit} />
         </View>
         {actionError ? <Text style={styles.errorText}>{actionError}</Text> : null}
         <View style={styles.actionWrap}>
@@ -1185,11 +1585,11 @@ function TradeDetail({
   );
 }
 
-function Field({ label: fieldLabel, onChangeText, value }: { label: string; onChangeText: (value: string) => void; value: string }) {
+function Field({ decimal = false, label: fieldLabel, onChangeText, value }: { decimal?: boolean; label: string; onChangeText: (value: string) => void; value: string }) {
   return (
     <View style={styles.field}>
       <Text style={styles.metricLabel}>{fieldLabel}</Text>
-      <TextInput keyboardType="decimal-pad" onChangeText={onChangeText} placeholder="0" placeholderTextColor="#71717a" style={styles.input} value={value} />
+      <TextInput keyboardType={decimal ? "decimal-pad" : "default"} onChangeText={onChangeText} placeholder="0" placeholderTextColor="#71717a" style={styles.input} value={value} />
     </View>
   );
 }
@@ -1237,7 +1637,7 @@ function normalizePaperAccount(row: Record<string, unknown> | null): PaperAccoun
 }
 
 function exchangeName(account: ExchangeAccount): WalletMode | "" {
-  const raw = String(account.exchange ?? "").toLowerCase();
+  const raw = String(account.exchange_name ?? account.exchange ?? "").toLowerCase();
   if (raw.includes("binance")) return "binance";
   if (raw.includes("bybit")) return "bybit";
   if (raw.includes("okx")) return "okx";
@@ -1268,13 +1668,19 @@ function livePnlForTrade(trade: TradeRow, moves: Record<string, MarketMove>) {
   const price = moveForTrade(trade, moves)?.lastPrice ?? 0;
   const entry = entryPrice(trade);
   const qty = quantityForTrade(trade);
+  const storedPnl = toNumber(trade.unrealized_pnl ?? trade.pnl);
+  const storedPct = toNumber(trade.pnl_pct);
   if (!isTradeOpen(trade) || !price || !entry || !qty) {
-    return { pnl: toNumber(trade.unrealized_pnl), pnlPct: toNumber(trade.pnl_pct) };
+    return { pnl: storedPnl, pnlPct: storedPct };
   }
   const isShort = String(trade.direction ?? "").toLowerCase() === "short";
   const pnl = (isShort ? entry - price : price - entry) * qty;
-  const notional = entry * qty;
-  return { pnl, pnlPct: notional > 0 ? (pnl / notional) * 100 : 0 };
+  const notional = toNumber(trade.notional) || entry * qty;
+  const computed = { pnl, pnlPct: notional > 0 ? (pnl / notional) * 100 : 0 };
+  if (storedPnl && Math.abs(computed.pnl) > Math.max(250, Math.abs(storedPnl) * 5)) {
+    return { pnl: storedPnl, pnlPct: storedPct };
+  }
+  return computed;
 }
 
 function getTpLevels(trade: TradeRow) {
@@ -1374,12 +1780,17 @@ const styles = StyleSheet.create({
   errorText: { color: "#fecdd3", fontSize: 12, lineHeight: 18 },
   content: { padding: 18, paddingBottom: 36 },
   header: { marginTop: 8, flexDirection: "row", alignItems: "center", justifyContent: "space-between", gap: 16 },
+  headerActions: { flexDirection: "row", alignItems: "center", gap: 8 },
   headerCopy: { flex: 1 },
   kicker: { color: "#5eead4", fontSize: 11, fontWeight: "800", letterSpacing: 1.4, textTransform: "uppercase" },
   heading: { marginTop: 4, color: "#fafafa", fontSize: 34, fontWeight: "800" },
   headingSmall: { marginTop: 4, color: "#fafafa", fontSize: 28, fontWeight: "800" },
   ghostButton: { borderRadius: 10, borderWidth: 1, borderColor: "rgba(255,255,255,0.12)", paddingHorizontal: 12, paddingVertical: 10 },
   ghostButtonText: { color: "#e4e4e7", fontWeight: "700" },
+  iconButton: { width: 40, height: 40, borderRadius: 14, alignItems: "center", justifyContent: "center", borderWidth: 1, borderColor: "rgba(255,255,255,0.14)", backgroundColor: "rgba(255,255,255,0.08)" },
+  iconButtonText: { color: "#fafafa", fontWeight: "900" },
+  profileButton: { width: 40, height: 40, borderRadius: 20, alignItems: "center", justifyContent: "center", backgroundColor: "#f4f4f5" },
+  profileButtonText: { color: "#09090b", fontWeight: "900" },
   walletWrap: { marginTop: 22, gap: 10 },
   sectionLabel: { color: "#a1a1aa", fontSize: 11, fontWeight: "800", textTransform: "uppercase" },
   walletRow: { flexDirection: "row", gap: 8 },
@@ -1509,6 +1920,7 @@ const styles = StyleSheet.create({
   field: { gap: 6 },
   actionWrap: { flexDirection: "row", flexWrap: "wrap", gap: 8 },
   actionButton: { minWidth: "30%", flexGrow: 1, borderRadius: 10, alignItems: "center", justifyContent: "center", backgroundColor: "rgba(255,255,255,0.08)", borderWidth: 1, borderColor: "rgba(255,255,255,0.12)", paddingVertical: 12 },
+  actionButtonActive: { backgroundColor: "rgba(94,234,212,0.18)", borderColor: "rgba(94,234,212,0.38)" },
   actionButtonDanger: { backgroundColor: "rgba(251,113,133,0.14)", borderColor: "rgba(251,113,133,0.3)" },
   actionButtonText: { color: "#fafafa", fontWeight: "800" },
   disabledButton: { opacity: 0.42 },
@@ -1520,4 +1932,13 @@ const styles = StyleSheet.create({
     paddingVertical: 14,
     alignItems: "center",
   },
+  inlineTitle: { flexDirection: "row", alignItems: "center", gap: 8 },
+  overlay: { ...StyleSheet.absoluteFillObject, zIndex: 20 },
+  overlayBackdrop: { ...StyleSheet.absoluteFillObject, backgroundColor: "rgba(0,0,0,0.38)" },
+  sideDrawer: { position: "absolute", left: 0, top: 0, bottom: 0, width: 300, padding: 22, paddingTop: 56, gap: 12, borderRightWidth: 1, borderRightColor: "rgba(255,255,255,0.12)", backgroundColor: "rgba(12,14,18,0.98)" },
+  profileDrawer: { position: "absolute", right: 0, top: 0, bottom: 0, width: 300, padding: 22, paddingTop: 58, gap: 14, borderLeftWidth: 1, borderLeftColor: "rgba(255,255,255,0.12)", backgroundColor: "rgba(12,14,18,0.98)" },
+  drawerItem: { borderRadius: 12, paddingHorizontal: 14, paddingVertical: 13, backgroundColor: "rgba(255,255,255,0.05)" },
+  drawerItemActive: { backgroundColor: "rgba(94,234,212,0.18)" },
+  drawerItemText: { color: "#fafafa", fontWeight: "800" },
+  profileAvatar: { width: 62, height: 62, borderRadius: 31, alignItems: "center", justifyContent: "center", backgroundColor: "#f4f4f5" },
 });

@@ -141,6 +141,11 @@ export const bots = {
     invoke<BotsActivateRequest, void>("bots-activate", body),
   pause:         (body: BotsPauseRequest) =>
     invoke<BotsPauseRequest, void>("bots-pause", body),
+  stop:          (body: BotsPauseRequest) =>
+    invoke<{ bot_id: string; action: "stop" }, void>("bot-control", {
+      bot_id: body.bot_id,
+      action: "stop",
+    }),
   archive:       (body: BotsArchiveRequest) =>
     invoke<BotsArchiveRequest, void>("bots-archive", body),
   updateConfig:  (body: BotsUpdateConfigRequest) =>

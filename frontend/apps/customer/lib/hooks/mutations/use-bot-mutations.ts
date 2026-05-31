@@ -22,10 +22,14 @@ export function useBotMutations() {
     mutationFn: (botId: string) => edgeFn.bots.pause({ bot_id: botId }),
     onSuccess,
   });
+  const stop = useMutation({
+    mutationFn: (botId: string) => edgeFn.bots.stop({ bot_id: botId }),
+    onSuccess,
+  });
   const archive = useMutation({
     mutationFn: (botId: string) => edgeFn.bots.archive({ bot_id: botId }),
     onSuccess,
   });
 
-  return { start, pause, archive };
+  return { start, pause, stop, archive };
 }

@@ -35,6 +35,7 @@ from src.db.models import (
 from src.db.repositories import (
     AuditLogRepository,
     BotRepository,
+    DuplicateOpenExposureError,
     PlatformSettingsRepository,
     RiskLogRepository,
     SecurityLogRepository,
@@ -676,6 +677,11 @@ class ExecutionEngine:
                     entry_price=entry_price,
                     market_snapshot=market_snapshot,
                 )
+        except DuplicateOpenExposureError as exc:
+            reason = f"Duplicate symbol exposure blocked at database layer: {exc}"
+            await self._notifications.trade_skipped(decision=decision, reason=reason)
+            await self._decision_repo.mark_skipped(decision.id, reason[:500])
+            return None
         except LiveExecutionError as exc:
             await self._fail(decision, f"Live execution error: {exc}")
             return None

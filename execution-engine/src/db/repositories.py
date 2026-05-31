@@ -41,6 +41,10 @@ from src.utils.time import utcnow_iso
 log = get_logger(__name__)
 
 
+class DuplicateOpenExposureError(RuntimeError):
+    """Raised when the DB rejects duplicate open user/mode/symbol exposure."""
+
+
 # ── Async helper ──────────────────────────────────────────────────────────────
 
 async def _run(fn, *args, **kwargs):
@@ -350,7 +354,18 @@ class TradeRepository:
                 .execute()
             )
 
-        result = await _run(_insert)
+        try:
+            result = await _run(_insert)
+        except Exception as exc:
+            message = str(exc)
+            if (
+                "trades_one_open_symbol_per_user_mode_idx" in message
+                or "duplicate key" in message.lower()
+            ):
+                raise DuplicateOpenExposureError(
+                    "Open exposure already exists for this user/mode/symbol"
+                ) from exc
+            raise
         rows = result.data or []
         if not rows:
             raise RuntimeError("Trade insert returned no rows")

@@ -6,7 +6,7 @@ import {
 import { cn, formatCurrency, formatRelative } from "@ta/utils";
 import type { Bot } from "@ta/types";
 import {
-  Archive, Bot as BotIcon, ChevronRight, Cpu, Pause, Play,
+  Bot as BotIcon, ChevronRight, Cpu, Pause, Play, Square, Trash2,
   Radar, TrendingUp, Zap,
 } from "lucide-react";
 import Link from "next/link";
@@ -42,7 +42,7 @@ const STATUS_META = {
 
 // ── Single bot card ──────────────────────────────────────────────────────────
 function BotCard({ bot, pnl, openTrades }: { bot: Bot; pnl: number; openTrades: number }) {
-  const { start, pause, archive } = useBotMutations();
+  const { start, pause, stop, archive } = useBotMutations();
 
   const status     = (STATUS_META[bot.status as keyof typeof STATUS_META] ?? STATUS_META.inactive);
   const warmup     = bot.warmup_status ?? "pending";
@@ -55,6 +55,7 @@ function BotCard({ bot, pnl, openTrades }: { bot: Bot; pnl: number; openTrades: 
   const busy =
     (start.isPending   && start.variables   === bot.id) ||
     (pause.isPending   && pause.variables   === bot.id) ||
+    (stop.isPending    && stop.variables    === bot.id) ||
     (archive.isPending && archive.variables === bot.id);
 
   return (
@@ -172,12 +173,22 @@ function BotCard({ bot, pnl, openTrades }: { bot: Bot; pnl: number; openTrades: 
         <Button
           size="sm"
           variant="ghost"
+          className="h-7 gap-1.5 text-[11px] text-muted-foreground hover:text-warning"
+          disabled={busy || bot.is_archived || bot.status !== "active"}
+          onClick={(e) => { e.stopPropagation(); stop.mutate(bot.id); }}
+          aria-label="Stop bot"
+        >
+          <Square className="h-3.5 w-3.5" /> Stop
+        </Button>
+        <Button
+          size="sm"
+          variant="ghost"
           className="h-7 w-7 p-0 text-muted-foreground hover:text-destructive"
           disabled={busy || bot.is_archived}
           onClick={(e) => { e.stopPropagation(); archive.mutate(bot.id); }}
-          aria-label="Archive bot"
+          aria-label="Delete bot"
         >
-          <Archive className="h-3.5 w-3.5" />
+          <Trash2 className="h-3.5 w-3.5" />
         </Button>
 
         {/* Detail link */}

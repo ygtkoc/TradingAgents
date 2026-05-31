@@ -22,6 +22,7 @@ export function useBots() {
       const { data, error } = await supabase
         .from("bots")
         .select("*")
+        .eq("user_id", user!.id)
         .eq("is_archived", false)
         .order("created_at", { ascending: false });
       if (error) throw error;
@@ -31,9 +32,10 @@ export function useBots() {
 }
 
 export function useBot(botId: string | undefined) {
+  const { data: user } = useCurrentUser();
   return useQuery<Bot | null>({
     queryKey: botId ? queryKeys.bots.detail(botId) : ["bots", "detail", "none"],
-    enabled:  !!botId,
+    enabled:  !!botId && !!user,
     staleTime: 0,
     refetchInterval: 10_000,
     queryFn: async () => {
@@ -46,6 +48,7 @@ export function useBot(botId: string | undefined) {
       const { data, error } = await supabase
         .from("bots")
         .select("*")
+        .eq("user_id", user!.id)
         .eq("id", botId)
         .maybeSingle();
       if (error) throw error;

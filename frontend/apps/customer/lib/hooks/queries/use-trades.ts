@@ -174,7 +174,11 @@ export function useTrades(filters: TradeFilters = {}) {
     refetchIntervalInBackground: true,
     queryFn: async () => {
       if (isDemoMode) return applyFilters(demoTrades, filters);
-      let q = supabase.from("trades").select("*").order("created_at", { ascending: false });
+      let q = supabase
+        .from("trades")
+        .select("*")
+        .eq("user_id", user!.id)
+        .order("created_at", { ascending: false });
       if (filters.status) {
         q = q.eq("status", filters.status);
       } else if (filters.statuses && filters.statuses.length > 0) {
@@ -216,6 +220,7 @@ export function useOpenTrades() {
       const { data, error } = await supabase
         .from("trades")
         .select("*")
+        .eq("user_id", user!.id)
         .eq("status", "open")
         .order("created_at", { ascending: false });
       if (error) throw error;
@@ -228,9 +233,10 @@ export function useOpenTrades() {
 }
 
 export function useTrade(tradeId: string | undefined) {
+  const { data: user } = useCurrentUser();
   return useQuery<Trade | null>({
     queryKey: tradeId ? queryKeys.trades.detail(tradeId) : ["trades", "detail", "none"],
-    enabled:  !!tradeId,
+    enabled:  !!tradeId && !!user,
     staleTime: 0,
     refetchInterval: 1_000,
     refetchIntervalInBackground: true,
@@ -242,6 +248,7 @@ export function useTrade(tradeId: string | undefined) {
       const { data, error } = await supabase
         .from("trades")
         .select("*")
+        .eq("user_id", user!.id)
         .eq("id", tradeId)
         .maybeSingle();
       if (error) throw error;

@@ -41,7 +41,9 @@ export type TradeRow = {
   r_multiple: number | string | null;
   realized_pnl: number | string | null;
   unrealized_pnl?: number | string | null;
+  pnl?: number | string | null;
   pnl_pct: number | string | null;
+  notional?: number | string | null;
   close_reason: string | null;
   metadata?: Record<string, unknown> | null;
   closed_at: string | null;
@@ -57,6 +59,7 @@ export type BotRow = {
   symbol: string | null;
   updated_at: string | null;
   created_at: string;
+  is_archived?: boolean | null;
 };
 
 export type MarketMove = {
