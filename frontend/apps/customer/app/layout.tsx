@@ -5,9 +5,16 @@ import "@ta/ui/styles.css";
 import "./globals.css";
 
 import { Providers } from "./providers";
+import { PwaRegister } from "./pwa-register";
+
+export const viewport = {
+  themeColor: "#07090b",
+  colorScheme: "dark",
+};
 
 export const metadata: Metadata = {
   metadataBase: new URL("https://customer.lucrandos.com"),
+  applicationName: "Lucrandos",
   title: {
     default: "Lucrandos Command Center",
     template: "%s | Lucrandos Command Center",
@@ -24,13 +31,29 @@ export const metadata: Metadata = {
       noimageindex: true,
     },
   },
+  appleWebApp: {
+    capable: true,
+    title: "Lucrandos",
+    statusBarStyle: "black-translucent",
+  },
+  formatDetection: {
+    telephone: false,
+  },
+  icons: {
+    icon: "/icon.svg",
+    apple: "/apple-icon.svg",
+  },
+  manifest: "/manifest.webmanifest",
 };
 
 export default function RootLayout({ children }: { children: ReactNode }) {
   return (
     <html lang="en" className="dark" suppressHydrationWarning>
       <body className="min-h-screen bg-background font-sans antialiased">
-        <Providers>{children}</Providers>
+        <Providers>
+          <PwaRegister />
+          {children}
+        </Providers>
       </body>
     </html>
   );
