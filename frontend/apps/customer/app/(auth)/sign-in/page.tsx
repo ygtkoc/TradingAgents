@@ -14,6 +14,7 @@ function SignInForm() {
   const router       = useRouter();
   const searchParams = useSearchParams();
   const requestedNext = searchParams.get("next");
+  const callbackError = searchParams.get("error");
   const next          = requestedNext?.startsWith("/") && !requestedNext.startsWith("//")
     ? requestedNext
     : "/dashboard";
@@ -34,15 +35,25 @@ function SignInForm() {
     }
 
     setBusy(true);
-    const { error: err } = await supabase.auth.signInWithPassword({ email, password });
-    setBusy(false);
+    try {
+      const { error: err } = await supabase.auth.signInWithPassword({
+        email: email.trim(),
+        password,
+      });
+      setBusy(false);
 
-    if (err) {
-      setError(err.message || "Could not sign in. Check your credentials.");
-      return;
+      if (err) {
+        setError(formatAuthError(err));
+        return;
+      }
+      window.location.assign(next);
+    } catch (err) {
+      setBusy(false);
+      setError(formatAuthError(err));
     }
-    window.location.assign(next);
   };
+
+  const visibleError = error ?? formatCallbackError(callbackError);
 
   return (
     <div className="space-y-6">
@@ -117,9 +128,9 @@ function SignInForm() {
               </div>
             </div>
 
-            {error ? (
+            {visibleError ? (
               <div className="rounded-xl border border-destructive/30 bg-destructive/10 px-4 py-3 text-[12px] text-destructive">
-                {error}
+                {visibleError}
               </div>
             ) : null}
 
@@ -157,4 +168,34 @@ export default function SignInPage() {
       <SignInForm />
     </Suspense>
   );
+}
+
+function formatCallbackError(value: string | null) {
+  if (!value) return null;
+  try {
+    const decoded = decodeURIComponent(value);
+    return decoded === "{}" ? "Sign in failed. Please try again." : decoded;
+  } catch {
+    return "Sign in failed. Please try again.";
+  }
+}
+
+function formatAuthError(error: unknown) {
+  if (error instanceof Error && error.message) {
+    return error.message;
+  }
+
+  if (typeof error === "object" && error !== null) {
+    const maybeMessage = (error as { message?: unknown; error_description?: unknown }).message
+      ?? (error as { message?: unknown; error_description?: unknown }).error_description;
+    if (typeof maybeMessage === "string" && maybeMessage.trim()) {
+      return maybeMessage;
+    }
+  }
+
+  if (typeof error === "string" && error.trim() && error !== "{}") {
+    return error;
+  }
+
+  return "Could not sign in. Check your credentials and try again.";
 }
