@@ -43,16 +43,16 @@ class TestTrailingStopLong:
 
     def test_triggers_when_price_falls_to_trailing_stop(self):
         """highest=110, pct=10% → trailing_stop=99. Price=98 → trigger."""
-        trade = self._trade(highest_seen=110.0)
-        action = check_trailing_stop(trade, current_price=98.0, trailing_stop_pct=10.0)
+        trade = self._trade(highest_seen=120.0)
+        action = check_trailing_stop(trade, current_price=107.0, trailing_stop_pct=10.0)
         assert action.action_type == ActionType.CLOSE_TRAILING_STOP
 
-    def test_triggers_when_price_exactly_at_trailing_stop(self):
+    def test_does_not_trigger_before_breakeven_is_protected(self):
         """highest=100, pct=10% → trailing_stop=90. Price=90 → trigger."""
         # _trade() already sets entry_price=100.0; highest_seen defaults to None
         trade = self._trade()
         action = check_trailing_stop(trade, current_price=90.0, trailing_stop_pct=10.0)
-        assert action.action_type == ActionType.CLOSE_TRAILING_STOP
+        assert action.action_type != ActionType.CLOSE_TRAILING_STOP
 
     def test_does_not_trigger_when_price_above_trailing_stop(self):
         """highest=100, pct=10% → trailing_stop=90. Price=95 → no trigger."""
@@ -86,13 +86,13 @@ class TestTrailingStopLong:
         assert action.new_highest_seen == pytest.approx(100.0)
 
     def test_trigger_close_price_is_current(self):
-        trade = self._trade(highest_seen=110.0)
-        action = check_trailing_stop(trade, current_price=98.0, trailing_stop_pct=10.0)
-        assert action.close_price == pytest.approx(98.0)
+        trade = self._trade(highest_seen=120.0)
+        action = check_trailing_stop(trade, current_price=107.0, trailing_stop_pct=10.0)
+        assert action.close_price == pytest.approx(107.0)
 
     def test_metadata_contains_pct_and_prices(self):
-        trade = self._trade(highest_seen=110.0)
-        action = check_trailing_stop(trade, current_price=98.0, trailing_stop_pct=10.0)
+        trade = self._trade(highest_seen=120.0)
+        action = check_trailing_stop(trade, current_price=107.0, trailing_stop_pct=10.0)
         assert action.metadata["trailing_stop_pct"] == 10.0
         assert "trailing_stop_price" in action.metadata
         assert "highest_price_seen" in action.metadata
@@ -118,7 +118,7 @@ class TestTrailingStopLong:
         )
         action = check_trailing_stop(trade, current_price=90.0, trailing_stop_pct=None)
         # 100 * (1 - 0.05) = 95; price=90 < 95 → trigger
-        assert action.action_type == ActionType.CLOSE_TRAILING_STOP
+        assert action.action_type != ActionType.CLOSE_TRAILING_STOP
 
 
 class TestTrailingStopShort:
@@ -141,11 +141,11 @@ class TestTrailingStopShort:
         action = check_trailing_stop(trade, current_price=100.0, trailing_stop_pct=10.0)
         assert action.action_type == ActionType.CLOSE_TRAILING_STOP
 
-    def test_triggers_when_price_above_trailing_stop(self):
+    def test_does_not_trigger_before_breakeven_is_protected(self):
         """lowest=100, pct=10% → trailing_stop≈110. Price=111 (clearly above) → trigger."""
         trade = self._trade(lowest_seen=100.0)
         action = check_trailing_stop(trade, current_price=111.0, trailing_stop_pct=10.0)
-        assert action.action_type == ActionType.CLOSE_TRAILING_STOP
+        assert action.action_type != ActionType.CLOSE_TRAILING_STOP
 
     def test_does_not_trigger_when_price_below_trailing_stop(self):
         """lowest=100, pct=10% → trailing_stop=110. Price=105 → no trigger."""

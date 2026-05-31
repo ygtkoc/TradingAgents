@@ -80,3 +80,51 @@ async def test_run_retries_transient_supabase_http2_errors(monkeypatch):
     assert calls == 3
     assert sleeps == [0.2, 0.4]
 
+
+def test_ssl_eof_is_transient_lifecycle_error():
+    assert repositories._is_transient_lifecycle_error(
+        "EOF occurred in violation of protocol (_ssl.c:2406)"
+    )
+
+
+@pytest.mark.asyncio
+async def test_fetch_claimable_ids_prioritizes_never_checked_trades():
+    class _Query:
+        def __init__(self) -> None:
+            self.calls: list[tuple[str, tuple[object, ...], dict[str, object]]] = []
+            self.data = [{"id": "newer-never-checked"}]
+
+        def select(self, *args, **kwargs):
+            self.calls.append(("select", args, kwargs))
+            return self
+
+        def in_(self, *args, **kwargs):
+            self.calls.append(("in_", args, kwargs))
+            return self
+
+        def order(self, *args, **kwargs):
+            self.calls.append(("order", args, kwargs))
+            return self
+
+        def limit(self, *args, **kwargs):
+            self.calls.append(("limit", args, kwargs))
+            return self
+
+        def execute(self):
+            return self
+
+    class _TradesClient:
+        def __init__(self, query: _Query) -> None:
+            self.query = query
+
+        def table(self, name: str):
+            assert name == "trades"
+            return self.query
+
+    query = _Query()
+    repo = TradeLifecycleRepository()
+    repo._client = _TradesClient(query)  # type: ignore[assignment]
+
+    assert await repo.fetch_claimable_ids(limit=10) == ["newer-never-checked"]
+    assert ("order", ("lifecycle_last_checked_at",), {"desc": False, "nullsfirst": True}) in query.calls
+    assert ("order", ("created_at",), {"desc": False}) in query.calls

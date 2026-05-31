@@ -74,6 +74,32 @@ def _check_long(
     # Compute trailing stop price
     new_trailing_stop = new_highest * (1.0 - pct / 100.0)
 
+    # Do not let trailing stop close a trade before it has earned enough
+    # favorable movement to protect breakeven. Plain SL remains responsible
+    # for initial downside risk.
+    armed = (trade.trailing_stop_price is not None and trade.trailing_stop_price >= trade.effective_entry_price) or (
+        new_trailing_stop >= trade.effective_entry_price
+    )
+    if not armed:
+        if new_highest > previous_highest or trade.highest_price_seen is None:
+            return LifecycleAction(
+                action_type=ActionType.UPDATE_TRAILING_STOP,
+                reason=(
+                    f"Trailing stop armed later (long): "
+                    f"highest={new_highest:.6f}, stop={new_trailing_stop:.6f}"
+                ),
+                new_trailing_stop=new_trailing_stop,
+                new_highest_seen=new_highest,
+                metadata={
+                    "trailing_stop_pct":   pct,
+                    "highest_price_seen":  new_highest,
+                    "trailing_stop_price": new_trailing_stop,
+                    "current_price":       current_price,
+                    "armed":               False,
+                },
+            )
+        return hold()
+
     # Check trigger
     triggered = current_price <= new_trailing_stop
 
@@ -132,6 +158,32 @@ def _check_short(
 
     # Compute trailing stop price
     new_trailing_stop = new_lowest * (1.0 + pct / 100.0)
+
+    # Do not let trailing stop close a trade before it has earned enough
+    # favorable movement to protect breakeven. Plain SL remains responsible
+    # for initial downside risk.
+    armed = (trade.trailing_stop_price is not None and trade.trailing_stop_price <= trade.effective_entry_price) or (
+        new_trailing_stop <= trade.effective_entry_price
+    )
+    if not armed:
+        if new_lowest < previous_lowest or trade.lowest_price_seen is None:
+            return LifecycleAction(
+                action_type=ActionType.UPDATE_TRAILING_STOP,
+                reason=(
+                    f"Trailing stop armed later (short): "
+                    f"lowest={new_lowest:.6f}, stop={new_trailing_stop:.6f}"
+                ),
+                new_trailing_stop=new_trailing_stop,
+                new_lowest_seen=new_lowest,
+                metadata={
+                    "trailing_stop_pct":   pct,
+                    "lowest_price_seen":   new_lowest,
+                    "trailing_stop_price": new_trailing_stop,
+                    "current_price":       current_price,
+                    "armed":               False,
+                },
+            )
+        return hold()
 
     # Check trigger
     triggered = current_price >= new_trailing_stop

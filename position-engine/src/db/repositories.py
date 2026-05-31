@@ -103,6 +103,8 @@ def _is_transient_lifecycle_error(error: object) -> bool:
         "invalid input streaminputs",
         "connectionstate.closed",
         "received pseudo-header in trailer",
+        "eof occurred in violation of protocol",
+        "ssl.c",
     )
     return text.strip().isdigit() or any(marker in text for marker in transient_markers)
 
@@ -137,6 +139,7 @@ class TradeLifecycleRepository:
                 .select("id")
                 .in_("status", ["pending", "open"])
                 .in_("lifecycle_status", ["idle", "needs_reconciliation"])
+                .order("lifecycle_last_checked_at", desc=False, nullsfirst=True)
                 .order("created_at", desc=False)
                 .limit(limit)
                 .execute()
