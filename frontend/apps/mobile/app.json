@@ -6,15 +6,25 @@
     "orientation": "portrait",
     "userInterfaceStyle": "dark",
     "scheme": "lucrandos",
-    "assetBundlePatterns": ["**/*"],
+    "assetBundlePatterns": [
+      "**/*"
+    ],
     "ios": {
       "supportsTablet": true,
-      "bundleIdentifier": "com.lucrandos.mobile"
+      "bundleIdentifier": "com.lucrandos.mobile",
+      "infoPlist": {
+        "ITSAppUsesNonExemptEncryption": false
+      }
     },
     "android": {
       "package": "com.lucrandos.mobile",
       "adaptiveIcon": {
         "backgroundColor": "#07090b"
+      }
+    },
+    "extra": {
+      "eas": {
+        "projectId": "b9e919f8-6e2a-466e-931e-b15aca61b0e5"
       }
     }
   }
