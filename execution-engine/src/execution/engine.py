@@ -39,6 +39,7 @@ from src.db.repositories import (
     RiskLogRepository,
     SecurityLogRepository,
     TradeDecisionRepository,
+    TradeRepository,
 )
 from src.execution.idempotency import IdempotencyChecker
 from src.execution.live_executor import LiveExecutionError, LiveExecutor
@@ -72,6 +73,7 @@ class ExecutionEngine:
         self._audit_log = AuditLogRepository()
         self._risk_log = RiskLogRepository()
         self._security_log = SecurityLogRepository()
+        self._trade_repo = TradeRepository()
         self._security_guard = SecurityExecutionGuard()
         self._risk_guard = RiskExecutionGuard()
         self._idempotency = IdempotencyChecker()
@@ -226,6 +228,47 @@ class ExecutionEngine:
             )
             await self._notifications.trade_executed(
                 decision=decision, trade=existing_trade
+            )
+            return
+
+        existing_symbol_exposure = await self._trade_repo.find_open_symbol_exposure(
+            user_id=decision.user_id,
+            symbol=decision.symbol,
+            mode=execution_mode,
+        )
+        if existing_symbol_exposure is not None:
+            reason = (
+                "Existing open exposure blocks new execution: "
+                f"{existing_symbol_exposure.symbol} "
+                f"{existing_symbol_exposure.direction or 'unknown'} "
+                f"trade {existing_symbol_exposure.id} is still open."
+            )
+            await self._risk_log.create(
+                RiskLogInsert(
+                    user_id=decision.user_id,
+                    bot_id=decision.bot_id,
+                    trade_decision_id=decision.id,
+                    risk_type="duplicate_symbol_exposure",
+                    severity=SeverityLevel.HIGH.value,
+                    triggered=True,
+                    message=reason[:400],
+                    metadata={
+                        "decision_id": decision.id,
+                        "existing_trade_id": existing_symbol_exposure.id,
+                        "existing_direction": existing_symbol_exposure.direction,
+                        "symbol": decision.symbol,
+                        "mode": execution_mode,
+                    },
+                )
+            )
+            await self._notifications.trade_skipped(decision=decision, reason=reason)
+            await self._decision_repo.mark_skipped(decision.id, reason[:500])
+            log.warning(
+                "execution.duplicate_symbol_exposure_blocked",
+                decision_id=decision.id,
+                existing_trade_id=existing_symbol_exposure.id,
+                symbol=decision.symbol,
+                mode=execution_mode,
             )
             return
 

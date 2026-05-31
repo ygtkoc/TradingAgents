@@ -1,8 +1,10 @@
 import { StatusBar } from "expo-status-bar";
-import { useCallback, useEffect, useMemo, useState } from "react";
+import React, { useCallback, useEffect, useMemo, useState } from "react";
 import {
   ActivityIndicator,
   Alert,
+  Animated,
+  Easing,
   KeyboardAvoidingView,
   Platform,
   Pressable,
@@ -20,7 +22,7 @@ import { label, minutesAgo, percent, rMultiple, scoreFromSummary } from "./src/l
 import { fetchMarketMoves, normalizeMarketSymbol } from "./src/lib/market";
 import type { BotRow, DecisionRow, MarketMove, SessionStatus, TradeRow } from "./src/types";
 
-type Tab = "overview" | "decisions" | "positions" | "bots";
+type Tab = "overview" | "decisions" | "positions" | "bots" | "paper" | "account";
 type WalletMode = "paper" | "binance" | "bybit" | "okx";
 type Screen =
   | { name: "home" }
@@ -152,9 +154,19 @@ const fallbackMoves: Record<string, MarketMove> = {
   SOLUSDT: { symbol: "SOLUSDT", change24h: 4.16, lastPrice: 163.4 },
 };
 
+const tabs: { key: Tab; label: string }[] = [
+  { key: "overview", label: "Home" },
+  { key: "decisions", label: "Decisions" },
+  { key: "positions", label: "Positions" },
+  { key: "bots", label: "Bots" },
+  { key: "paper", label: "Paper" },
+  { key: "account", label: "Account" },
+];
+
 export default function App() {
   const [sessionStatus, setSessionStatus] = useState<SessionStatus>("loading");
   const [email, setEmail] = useState("");
+  const [accountEmail, setAccountEmail] = useState("");
   const [password, setPassword] = useState("");
   const [authLoading, setAuthLoading] = useState(false);
   const [activeTab, setActiveTab] = useState<Tab>("overview");
@@ -175,6 +187,17 @@ export default function App() {
   const [paperAccount, setPaperAccount] = useState<PaperAccount | null>(null);
   const [exchanges, setExchanges] = useState<ExchangeAccount[]>([]);
   const [moves, setMoves] = useState<Record<string, MarketMove>>(fallbackMoves);
+  const [routeAnim] = useState(() => new Animated.Value(1));
+
+  useEffect(() => {
+    routeAnim.setValue(0);
+    Animated.timing(routeAnim, {
+      toValue: 1,
+      duration: 240,
+      easing: Easing.out(Easing.cubic),
+      useNativeDriver: true,
+    }).start();
+  }, [activeTab, routeAnim, screen]);
 
   useEffect(() => {
     if (!hasSupabaseEnv) {
@@ -184,10 +207,12 @@ export default function App() {
 
     supabase.auth.getSession().then(({ data }) => {
       setSessionStatus(data.session ? "signed-in" : "signed-out");
+      setAccountEmail(data.session?.user.email ?? "");
     });
 
     const { data } = supabase.auth.onAuthStateChange((_event, session) => {
       setSessionStatus(session ? "signed-in" : "signed-out");
+      setAccountEmail(session?.user.email ?? "");
     });
 
     return () => {
@@ -203,32 +228,35 @@ export default function App() {
     const userResult = await supabase.auth.getUser();
     const userId = userResult.data.user?.id;
 
+    if (!userId) {
+      return;
+    }
+
     const [decisionResult, tradeResult, botResult, paperResult, exchangeResult] = await Promise.all([
       supabase
         .from("trade_decisions")
         .select("*")
+        .eq("user_id", userId)
         .order("created_at", { ascending: false })
         .limit(30),
       supabase
         .from("trades")
         .select("*")
+        .eq("user_id", userId)
         .order("created_at", { ascending: false })
         .limit(50),
       supabase
         .from("bots")
-        .select("id,name,status,mode,symbol,updated_at,created_at")
+        .select("id,user_id,name,status,mode,symbol,updated_at,created_at")
+        .eq("user_id", userId)
         .order("created_at", { ascending: false })
         .limit(20),
-      userId
-        ? supabase.from("paper_accounts").select("*").eq("user_id", userId).maybeSingle()
-        : Promise.resolve({ data: null, error: null }),
-      userId
-        ? supabase
-            .from("exchange_accounts")
-            .select("id,exchange,label,is_active,can_trade")
-            .eq("user_id", userId)
-            .order("created_at", { ascending: false })
-        : Promise.resolve({ data: [], error: null }),
+      supabase.from("paper_accounts").select("*").eq("user_id", userId).maybeSingle(),
+      supabase
+        .from("exchange_accounts")
+        .select("id,exchange,label,is_active,can_trade")
+        .eq("user_id", userId)
+        .order("created_at", { ascending: false }),
     ]);
 
     if (decisionResult.error) console.warn("mobile.decisions.failed", decisionResult.error.message);
@@ -237,9 +265,9 @@ export default function App() {
     if (paperResult.error) console.warn("mobile.paper.failed", paperResult.error.message);
     if (exchangeResult.error) console.warn("mobile.exchanges.failed", exchangeResult.error.message);
 
-    const nextDecisions = decisionResult.data?.length ? (decisionResult.data as DecisionRow[]) : fallbackDecisions;
-    const nextTrades = tradeResult.data?.length ? (tradeResult.data as TradeRow[]) : fallbackTrades;
-    const nextBots = botResult.data?.length ? (botResult.data as BotRow[]) : fallbackBots;
+    const nextDecisions = decisionResult.data ? (decisionResult.data as DecisionRow[]) : fallbackDecisions;
+    const nextTrades = tradeResult.data ? (tradeResult.data as TradeRow[]) : fallbackTrades;
+    const nextBots = botResult.data ? (botResult.data as BotRow[]) : fallbackBots;
     const nextSymbols = [
       ...nextDecisions.map((decision) => decision.symbol),
       ...nextTrades.map((trade) => trade.symbol),
@@ -288,6 +316,66 @@ export default function App() {
     await supabase.auth.signOut();
     setScreen({ name: "home" });
   }, []);
+
+  const navigateHome = useCallback(() => setScreen({ name: "home" }), []);
+  const openDecision = useCallback((id: string) => setScreen({ name: "decision", id }), []);
+  const openTrade = useCallback((id: string) => setScreen({ name: "trade", id }), []);
+
+  const resetPaperAccount = useCallback(() => {
+    Alert.alert(
+      "Reset paper account",
+      "This clears paper positions, decisions, account events, and resets the simulated balance.",
+      [
+        { text: "Cancel", style: "cancel" },
+        {
+          text: "Reset",
+          style: "destructive",
+          onPress: async () => {
+            setBusy("paper-reset");
+            const userResult = await supabase.auth.getUser();
+            const userId = userResult.data.user?.id;
+            if (!userId) {
+              setBusy(null);
+              Alert.alert("Not signed in", "Please sign in again.");
+              return;
+            }
+
+            const { error: edgeError } = await supabase.functions.invoke("paper-account-reset", { body: {} });
+            if (!edgeError) {
+              setBusy(null);
+              await loadDashboard();
+              return;
+            }
+
+            const { error: rpcError } = await (supabase as any).rpc("paper_reset", {
+              p_user_id: userId,
+              p_starting_balance: null,
+            });
+            setBusy(null);
+
+            if (rpcError) {
+              Alert.alert("Reset failed", rpcError.message || edgeError.message);
+              return;
+            }
+
+            await loadDashboard();
+          },
+        },
+      ],
+    );
+  }, [loadDashboard]);
+
+  const transitionStyle = {
+    opacity: routeAnim,
+    transform: [
+      {
+        translateY: routeAnim.interpolate({
+          inputRange: [0, 1],
+          outputRange: [16, 0],
+        }),
+      },
+    ],
+  };
 
   const selectedDecision = screen.name === "decision" ? decisions.find((decision) => decision.id === screen.id) : null;
   const selectedTrade = screen.name === "trade" ? trades.find((trade) => trade.id === screen.id) : null;
@@ -463,7 +551,7 @@ export default function App() {
 
   if (selectedDecision) {
     return (
-      <Shell title={selectedDecision.symbol} subtitle="Decision detail" onBack={() => setScreen({ name: "home" })}>
+      <Shell title={selectedDecision.symbol} subtitle="Decision detail" onBack={navigateHome} transitionStyle={transitionStyle}>
         <DecisionDetail
           busy={busy}
           decision={selectedDecision}
@@ -479,7 +567,7 @@ export default function App() {
 
   if (selectedTrade) {
     return (
-      <Shell title={selectedTrade.symbol} subtitle="Position detail" onBack={() => setScreen({ name: "home" })}>
+      <Shell title={selectedTrade.symbol} subtitle="Position detail" onBack={navigateHome} transitionStyle={transitionStyle}>
         <TradeDetail
           actionError={actionError}
           busy={busy}
@@ -504,13 +592,14 @@ export default function App() {
   return (
     <SafeAreaView style={styles.safeArea}>
       <StatusBar style="light" />
-      <ScrollView
+      <Animated.ScrollView
         contentContainerStyle={styles.content}
         refreshControl={<RefreshControl refreshing={refreshing} tintColor="#5eead4" onRefresh={onRefresh} />}
+        style={transitionStyle}
       >
         <View style={styles.header}>
           <View style={styles.headerCopy}>
-            <Text style={styles.kicker}>AI trading OS</Text>
+            <Text style={styles.kicker}>Lucrandos AI trading OS</Text>
             <Text style={styles.heading}>Command</Text>
           </View>
           <Pressable onPress={signOut} style={styles.ghostButton}>
@@ -521,23 +610,17 @@ export default function App() {
         <WalletSelector exchanges={exchanges} selected={wallet} setSelected={setWallet} />
         <WalletSummary portfolio={portfolio} wallet={wallet} />
 
-        <View style={styles.tabs}>
-          {(["overview", "decisions", "positions", "bots"] as Tab[]).map((tab) => (
-            <Pressable key={tab} onPress={() => setActiveTab(tab)} style={[styles.tab, activeTab === tab && styles.tabActive]}>
-              <Text style={[styles.tabText, activeTab === tab && styles.tabTextActive]}>{label(tab)}</Text>
-            </Pressable>
-          ))}
-        </View>
+        <LiquidTabs activeTab={activeTab} setActiveTab={setActiveTab} />
 
         {activeTab === "overview" ? (
           <View style={styles.stack}>
             <SectionTitle title="Live positions" value={`${portfolio.openCount} open`} />
             {walletTrades.filter(isTradeOpen).slice(0, 6).map((trade) => (
-              <TradeCard key={trade.id} trade={trade} move={moveForTrade(trade, moves)} onPress={() => setScreen({ name: "trade", id: trade.id })} />
+              <TradeCard key={trade.id} trade={trade} move={moveForTrade(trade, moves)} onPress={() => openTrade(trade.id)} />
             ))}
             <SectionTitle title="Manual approvals" value={`${decisions.filter(isPendingManualDecision).length} pending`} />
             {decisions.filter(isPendingManualDecision).slice(0, 5).map((decision) => (
-              <DecisionCard key={decision.id} decision={decision} move={moves[normalizeMarketSymbol(decision.symbol)]} onPress={() => setScreen({ name: "decision", id: decision.id })} />
+              <DecisionCard key={decision.id} decision={decision} move={moves[normalizeMarketSymbol(decision.symbol)]} onPress={() => openDecision(decision.id)} />
             ))}
           </View>
         ) : null}
@@ -545,7 +628,7 @@ export default function App() {
         {activeTab === "decisions" ? (
           <View style={styles.stack}>
             {decisions.map((decision) => (
-              <DecisionCard key={decision.id} decision={decision} move={moves[normalizeMarketSymbol(decision.symbol)]} onPress={() => setScreen({ name: "decision", id: decision.id })} />
+              <DecisionCard key={decision.id} decision={decision} move={moves[normalizeMarketSymbol(decision.symbol)]} onPress={() => openDecision(decision.id)} />
             ))}
           </View>
         ) : null}
@@ -553,7 +636,7 @@ export default function App() {
         {activeTab === "positions" ? (
           <View style={styles.stack}>
             {walletTrades.map((trade) => (
-              <TradeCard key={trade.id} trade={trade} move={moveForTrade(trade, moves)} onPress={() => setScreen({ name: "trade", id: trade.id })} />
+              <TradeCard key={trade.id} trade={trade} move={moveForTrade(trade, moves)} onPress={() => openTrade(trade.id)} />
             ))}
           </View>
         ) : null}
@@ -571,16 +654,42 @@ export default function App() {
             ))}
           </View>
         ) : null}
-      </ScrollView>
+
+        {activeTab === "paper" ? (
+          <PaperControls
+            busy={busy}
+            paperAccount={paperAccount}
+            portfolio={portfolio}
+            resetPaperAccount={resetPaperAccount}
+            walletTrades={walletTrades}
+          />
+        ) : null}
+
+        {activeTab === "account" ? (
+          <AccountPanel email={accountEmail || email} exchanges={exchanges} onSignOut={signOut} paperAccount={paperAccount} />
+        ) : null}
+      </Animated.ScrollView>
     </SafeAreaView>
   );
 }
 
-function Shell({ children, onBack, subtitle, title }: { children: React.ReactNode; onBack: () => void; subtitle: string; title: string }) {
+function Shell({
+  children,
+  onBack,
+  subtitle,
+  title,
+  transitionStyle,
+}: {
+  children: React.ReactNode;
+  onBack: () => void;
+  subtitle: string;
+  title: string;
+  transitionStyle: object;
+}) {
   return (
     <SafeAreaView style={styles.safeArea}>
       <StatusBar style="light" />
-      <ScrollView contentContainerStyle={styles.content}>
+      <Animated.ScrollView contentContainerStyle={styles.content} style={transitionStyle}>
         <View style={styles.header}>
           <View style={styles.headerCopy}>
             <Text style={styles.kicker}>{subtitle}</Text>
@@ -591,7 +700,7 @@ function Shell({ children, onBack, subtitle, title }: { children: React.ReactNod
           </Pressable>
         </View>
         {children}
-      </ScrollView>
+      </Animated.ScrollView>
     </SafeAreaView>
   );
 }
@@ -648,6 +757,138 @@ function WalletSummary({ portfolio, wallet }: { portfolio: ReturnType<typeof use
         <Metric label="Reserved" value={portfolio.reserved == null ? "--" : currency(portfolio.reserved)} />
         <Metric label="Realized" value={currency(portfolio.realized)} />
       </View>
+    </View>
+  );
+}
+
+function LiquidTabs({ activeTab, setActiveTab }: { activeTab: Tab; setActiveTab: (tab: Tab) => void }) {
+  return (
+    <View style={styles.liquidTabs}>
+      <ScrollView horizontal showsHorizontalScrollIndicator={false}>
+        <View style={styles.liquidTabsRow}>
+          {tabs.map((tab) => {
+            const active = activeTab === tab.key;
+            return (
+              <Pressable
+                key={tab.key}
+                onPress={() => setActiveTab(tab.key)}
+                style={[styles.liquidTab, active && styles.liquidTabActive]}
+              >
+                <Text style={[styles.liquidTabText, active && styles.liquidTabTextActive]}>{tab.label}</Text>
+              </Pressable>
+            );
+          })}
+        </View>
+      </ScrollView>
+    </View>
+  );
+}
+
+function PaperControls({
+  busy,
+  paperAccount,
+  portfolio,
+  resetPaperAccount,
+  walletTrades,
+}: {
+  busy: string | null;
+  paperAccount: PaperAccount | null;
+  portfolio: ReturnType<typeof usePortfolioShape>;
+  resetPaperAccount: () => void;
+  walletTrades: TradeRow[];
+}) {
+  const openPaperTrades = walletTrades.filter(isTradeOpen);
+
+  return (
+    <View style={styles.stack}>
+      <View style={styles.card}>
+        <View style={styles.rowBetween}>
+          <View>
+            <Text style={styles.kicker}>Lucrandos paper trading</Text>
+            <Text style={styles.symbol}>Paper account controls</Text>
+            <Text style={styles.meta}>
+              {paperAccount ? `${label(paperAccount.status)} / ${openPaperTrades.length} open positions` : "No paper account loaded"}
+            </Text>
+          </View>
+          <Badge tone={paperAccount?.status === "active" ? "good" : "neutral"}>{label(paperAccount?.status ?? "missing")}</Badge>
+        </View>
+        <View style={styles.detailGrid}>
+          <Metric label="Equity" value={currency(portfolio.equity)} />
+          <Metric label="Live P&L" value={currency(portfolio.livePnl)} />
+          <Metric label="Total %" value={percent(portfolio.pnlPct)} />
+        </View>
+        <Pressable disabled={busy === "paper-reset"} onPress={resetPaperAccount} style={styles.dangerButtonFull}>
+          <Text style={styles.dangerButtonText}>{busy === "paper-reset" ? "Resetting..." : "Reset paper account"}</Text>
+        </Pressable>
+      </View>
+
+      <View style={styles.card}>
+        <SectionTitle title="Current paper positions" value={`${openPaperTrades.length} open`} />
+        {openPaperTrades.length ? (
+          openPaperTrades.slice(0, 5).map((trade) => (
+            <View key={trade.id} style={styles.tpRow}>
+              <Text style={styles.symbolSmall}>{trade.symbol}</Text>
+              <Text style={styles.muted}>{label(trade.direction)} / {formatPrice(entryPrice(trade))}</Text>
+              <Text style={styles.goodText}>{formatPrice(toNumber(trade.take_profit))}</Text>
+            </View>
+          ))
+        ) : (
+          <Text style={styles.muted}>No open paper positions.</Text>
+        )}
+      </View>
+    </View>
+  );
+}
+
+function AccountPanel({
+  email,
+  exchanges,
+  onSignOut,
+  paperAccount,
+}: {
+  email: string;
+  exchanges: ExchangeAccount[];
+  onSignOut: () => void;
+  paperAccount: PaperAccount | null;
+}) {
+  return (
+    <View style={styles.stack}>
+      <View style={styles.card}>
+        <View style={styles.rowBetween}>
+          <View>
+            <Text style={styles.kicker}>Lucrandos account</Text>
+            <Text style={styles.symbol}>{email || "Signed in"}</Text>
+            <Text style={styles.meta}>Mobile command center preferences and connections.</Text>
+          </View>
+          <View style={styles.logoSmall}>
+            <Text style={styles.logoText}>L</Text>
+          </View>
+        </View>
+        <View style={styles.detailGrid}>
+          <Metric label="Paper" value={label(paperAccount?.status ?? "missing")} />
+          <Metric label="Exchanges" value={String(exchanges.length)} />
+          <Metric label="Mode" value="Mobile" />
+        </View>
+      </View>
+
+      <View style={styles.card}>
+        <SectionTitle title="Connected wallets" value={`${exchanges.length} total`} />
+        {exchanges.length ? (
+          exchanges.map((exchange) => (
+            <View key={exchange.id} style={styles.tpRow}>
+              <Text style={styles.symbolSmall}>{exchange.label || label(exchange.exchange)}</Text>
+              <Text style={styles.muted}>{exchange.can_trade ? "Trading enabled" : "Read only"}</Text>
+              <View style={[styles.dot, exchange.is_active ? styles.dotGood : styles.dotMuted]} />
+            </View>
+          ))
+        ) : (
+          <Text style={styles.muted}>Only Paper is active. Add exchange keys from the web dashboard when ready.</Text>
+        )}
+      </View>
+
+      <Pressable onPress={onSignOut} style={styles.ghostButtonWide}>
+        <Text style={styles.ghostButtonText}>Sign out</Text>
+      </Pressable>
     </View>
   );
 }
@@ -1090,7 +1331,7 @@ const styles = StyleSheet.create({
   safeArea: { flex: 1, backgroundColor: "#07090b" },
   keyboardScreen: { flex: 1 },
   centered: { flex: 1, alignItems: "center", justifyContent: "center", gap: 12 },
-  authContent: { flexGrow: 1, justifyContent: "center", padding: 24, paddingBottom: 80 },
+  authContent: { flexGrow: 1, justifyContent: "flex-start", padding: 24, paddingTop: 84, paddingBottom: 140 },
   logo: {
     width: 48,
     height: 48,
@@ -1102,6 +1343,16 @@ const styles = StyleSheet.create({
     backgroundColor: "rgba(94,234,212,0.1)",
   },
   logoText: { color: "#ccfbf1", fontSize: 18, fontWeight: "800" },
+  logoSmall: {
+    width: 42,
+    height: 42,
+    borderRadius: 12,
+    alignItems: "center",
+    justifyContent: "center",
+    borderWidth: 1,
+    borderColor: "rgba(94,234,212,0.35)",
+    backgroundColor: "rgba(94,234,212,0.1)",
+  },
   title: { marginTop: 18, color: "#fafafa", fontSize: 42, fontWeight: "800" },
   subtitle: { marginTop: 10, color: "#a1a1aa", fontSize: 16, lineHeight: 24 },
   authCard: { marginTop: 28, gap: 12 },
@@ -1177,6 +1428,36 @@ const styles = StyleSheet.create({
   tabActive: { backgroundColor: "#f4f4f5" },
   tabText: { color: "#a1a1aa", fontSize: 11, fontWeight: "800" },
   tabTextActive: { color: "#09090b" },
+  liquidTabs: {
+    marginTop: 18,
+    borderRadius: 18,
+    borderWidth: 1,
+    borderColor: "rgba(255,255,255,0.14)",
+    backgroundColor: "rgba(255,255,255,0.07)",
+    padding: 5,
+    shadowColor: "#5eead4",
+    shadowOpacity: 0.18,
+    shadowRadius: 18,
+  },
+  liquidTabsRow: { flexDirection: "row", gap: 6 },
+  liquidTab: {
+    minWidth: 88,
+    alignItems: "center",
+    borderRadius: 14,
+    paddingHorizontal: 12,
+    paddingVertical: 11,
+    borderWidth: 1,
+    borderColor: "transparent",
+  },
+  liquidTabActive: {
+    backgroundColor: "rgba(244,244,245,0.92)",
+    borderColor: "rgba(255,255,255,0.72)",
+    shadowColor: "#ffffff",
+    shadowOpacity: 0.24,
+    shadowRadius: 12,
+  },
+  liquidTabText: { color: "#a1a1aa", fontSize: 11, fontWeight: "900" },
+  liquidTabTextActive: { color: "#09090b" },
   stack: { marginTop: 16, gap: 12 },
   sectionHeader: { flexDirection: "row", alignItems: "center", justifyContent: "space-between" },
   sectionTitle: { color: "#fafafa", fontSize: 16, fontWeight: "900" },
@@ -1220,6 +1501,7 @@ const styles = StyleSheet.create({
   actionRow: { flexDirection: "row", gap: 10 },
   primaryButtonSmall: { flex: 1, borderRadius: 10, alignItems: "center", justifyContent: "center", backgroundColor: "#5eead4", paddingVertical: 13 },
   dangerButtonSmall: { flex: 1, borderRadius: 10, alignItems: "center", justifyContent: "center", backgroundColor: "rgba(251,113,133,0.16)", borderWidth: 1, borderColor: "rgba(251,113,133,0.35)", paddingVertical: 13 },
+  dangerButtonFull: { borderRadius: 10, alignItems: "center", justifyContent: "center", backgroundColor: "rgba(251,113,133,0.16)", borderWidth: 1, borderColor: "rgba(251,113,133,0.35)", paddingVertical: 14 },
   dangerButtonText: { color: "#fecdd3", fontWeight: "800" },
   jsonText: { color: "#d4d4d8", fontSize: 12, lineHeight: 18 },
   tpRow: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", paddingVertical: 7, borderTopWidth: 1, borderTopColor: "rgba(255,255,255,0.06)" },
@@ -1230,4 +1512,12 @@ const styles = StyleSheet.create({
   actionButtonDanger: { backgroundColor: "rgba(251,113,133,0.14)", borderColor: "rgba(251,113,133,0.3)" },
   actionButtonText: { color: "#fafafa", fontWeight: "800" },
   disabledButton: { opacity: 0.42 },
+  ghostButtonWide: {
+    borderRadius: 10,
+    borderWidth: 1,
+    borderColor: "rgba(255,255,255,0.12)",
+    paddingHorizontal: 12,
+    paddingVertical: 14,
+    alignItems: "center",
+  },
 });

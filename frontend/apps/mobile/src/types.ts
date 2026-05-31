@@ -2,6 +2,8 @@ export type SessionStatus = "loading" | "signed-out" | "signed-in";
 
 export type DecisionRow = {
   id: string;
+  user_id?: string | null;
+  bot_id?: string | null;
   symbol: string;
   direction: string | null;
   mode: string | null;
@@ -19,6 +21,9 @@ export type DecisionRow = {
 
 export type TradeRow = {
   id: string;
+  user_id?: string | null;
+  bot_id?: string | null;
+  trade_decision_id?: string | null;
   symbol: string;
   direction: string | null;
   mode: string | null;
@@ -45,6 +50,7 @@ export type TradeRow = {
 
 export type BotRow = {
   id: string;
+  user_id?: string | null;
   name: string;
   status: string;
   mode: string | null;

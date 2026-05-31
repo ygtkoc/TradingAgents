@@ -375,6 +375,42 @@ class TradeRepository:
             return Trade.model_validate(result.data[0])
         return None
 
+    async def find_open_symbol_exposure(
+        self,
+        *,
+        user_id: str,
+        symbol: str,
+        mode: Optional[str] = None,
+    ) -> Optional[Trade]:
+        """
+        Return an existing open trade for the same user+symbol exposure.
+
+        This is deliberately broader than decision idempotency: a new decision
+        must not open another HBAR/CHZ/etc. position while an earlier position
+        on that symbol is still open, even if the new decision has the opposite
+        direction.
+        """
+        target = _normalize_symbol(symbol)
+
+        def _select():
+            query = (
+                self._client.table("trades")
+                .select("*")
+                .eq("user_id", user_id)
+                .eq("status", "open")
+                .order("created_at", desc=True)
+                .limit(100)
+            )
+            if mode:
+                query = query.eq("mode", mode)
+            return query.execute()
+
+        result = await _run(_select)
+        for row in result.data or []:
+            if _normalize_symbol(str(row.get("symbol") or "")) == target:
+                return Trade.model_validate(row)
+        return None
+
     async def get_by_id(self, trade_id: str) -> Optional[Trade]:
         def _select():
             return (
@@ -539,3 +575,7 @@ class MarketDataRepository:
         if result.data:
             return MarketSnapshot.model_validate(result.data[0])
         return None
+
+
+def _normalize_symbol(symbol: str) -> str:
+    return "".join(ch for ch in symbol.upper() if ch.isalnum())
