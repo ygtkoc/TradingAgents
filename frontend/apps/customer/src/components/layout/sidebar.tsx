@@ -38,6 +38,7 @@ const NAV_SECTIONS: { title: string; items: NavItem[] }[] = [
     items: [
       { href: "/paper", label: "Paper engine", icon: CircuitBoard },
       { href: "/live", label: "Live gates", icon: Wallet },
+      { href: "/markets", label: "Markets", icon: CandlestickChart },
       { href: "/trades", label: "Positions", icon: CandlestickChart },
     ],
   },

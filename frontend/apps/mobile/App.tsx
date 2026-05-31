@@ -20,7 +20,7 @@ import {
 
 import { hasSupabaseEnv, supabase } from "./src/lib/supabase";
 import { label, minutesAgo, percent, rMultiple, scoreFromSummary } from "./src/lib/format";
-import { fetchMarketMoves, normalizeMarketSymbol } from "./src/lib/market";
+import { fetchBookTicker, fetchCandles, fetchMarketMoves, normalizeMarketSymbol, type MarketBook, type MarketCandle } from "./src/lib/market";
 import type { BotRow, DecisionRow, MarketMove, SessionStatus, TradeRow } from "./src/types";
 
 type Tab = "overview" | "decisions" | "positions" | "markets" | "bots" | "paper" | "account";
@@ -169,6 +169,8 @@ const tabs: { key: Tab; label: string }[] = [
   { key: "account", label: "Account" },
 ];
 
+const marketPairs = ["BTCUSDT", "ETHUSDT", "BNBUSDT", "SOLUSDT", "XRPUSDT", "HBARUSDT", "CHZUSDT", "DOGEUSDT", "AVAXUSDT", "LINKUSDT"];
+
 export default function App() {
   const [sessionStatus, setSessionStatus] = useState<SessionStatus>("loading");
   const [email, setEmail] = useState("");
@@ -197,6 +199,8 @@ export default function App() {
   const [marketEntry, setMarketEntry] = useState("");
   const [marketStop, setMarketStop] = useState("");
   const [marketRisk, setMarketRisk] = useState("1");
+  const [marketBook, setMarketBook] = useState<MarketBook | null>(null);
+  const [marketCandles, setMarketCandles] = useState<MarketCandle[]>([]);
   const [decisions, setDecisions] = useState<DecisionRow[]>(fallbackDecisions);
   const [trades, setTrades] = useState<TradeRow[]>(fallbackTrades);
   const [bots, setBots] = useState<BotRow[]>(fallbackBots);
@@ -206,6 +210,16 @@ export default function App() {
   const [routeAnim] = useState(() => new Animated.Value(1));
   const drawerX = useRef(new Animated.Value(-310)).current;
   const profileX = useRef(new Animated.Value(310)).current;
+
+  const openDrawer = useCallback(() => {
+    drawerX.setValue(-310);
+    setDrawerOpen(true);
+  }, [drawerX]);
+
+  const openProfile = useCallback(() => {
+    profileX.setValue(310);
+    setProfileOpen(true);
+  }, [profileX]);
 
   useEffect(() => {
     routeAnim.setValue(0);
@@ -239,16 +253,13 @@ export default function App() {
 
   const panResponder = useMemo(
     () => PanResponder.create({
-      onMoveShouldSetPanResponder: (_, gesture) => Math.abs(gesture.dx) > 24 && Math.abs(gesture.dy) < 18,
+      onMoveShouldSetPanResponder: (event, gesture) =>
+        event.nativeEvent.pageX < 24 && gesture.dx > 28 && Math.abs(gesture.dy) < 18,
       onPanResponderRelease: (_, gesture) => {
-        if (gesture.dx > 70) setDrawerOpen(true);
-        if (gesture.dx < -70) {
-          setDrawerOpen(false);
-          setProfileOpen(false);
-        }
+        if (gesture.dx > 70) openDrawer();
       },
     }),
-    [],
+    [openDrawer],
   );
 
   useEffect(() => {
@@ -343,6 +354,32 @@ export default function App() {
     return () => clearInterval(timer);
   }, [loadDashboard]);
 
+  useEffect(() => {
+    let cancelled = false;
+
+    async function loadMarketPanel() {
+      const symbol = normalizeMarketSymbol(marketSymbol);
+      const [moveMap, book, candles] = await Promise.all([
+        fetchMarketMoves([symbol]),
+        fetchBookTicker(symbol),
+        fetchCandles(symbol),
+      ]);
+      if (cancelled) return;
+      setMoves((current) => ({ ...current, ...moveMap }));
+      setMarketBook(book);
+      setMarketCandles(candles);
+      const last = moveMap[symbol]?.lastPrice;
+      if (last && !marketEntry) setMarketEntry(String(trimNumber(last)));
+    }
+
+    void loadMarketPanel();
+    const timer = setInterval(() => void loadMarketPanel(), 2_500);
+    return () => {
+      cancelled = true;
+      clearInterval(timer);
+    };
+  }, [marketEntry, marketSymbol]);
+
   const onRefresh = useCallback(async () => {
     setRefreshing(true);
     await loadDashboard();
@@ -417,6 +454,30 @@ export default function App() {
       ],
     );
   }, [loadDashboard]);
+
+  const setPaperAutonomous = useCallback(async (action: "start" | "stop") => {
+    const confirmed = action === "start" ? "Start autonomous paper engine?" : "Stop autonomous paper engine?";
+    Alert.alert(confirmed, action === "start" ? "Paper account and paper bots will be started." : "Paper account will pause and active paper bots will be stopped.", [
+      { text: "Cancel", style: "cancel" },
+      {
+        text: action === "start" ? "Start" : "Stop",
+        onPress: async () => {
+          setBusy(`paper-${action}`);
+          await supabase.functions.invoke(action === "start" ? "paper-account-start" : "paper-account-pause", { body: {} });
+          const paperBots = bots.filter((bot) => (bot.mode ?? "paper") === "paper" && !bot.is_archived);
+          await Promise.allSettled(
+            paperBots.map((bot) =>
+              action === "start"
+                ? supabase.functions.invoke("bots-activate", { body: { bot_id: bot.id } })
+                : supabase.functions.invoke("bot-control", { body: { bot_id: bot.id, action: "stop" } }),
+            ),
+          );
+          setBusy(null);
+          await loadDashboard();
+        },
+      },
+    ]);
+  }, [bots, loadDashboard]);
 
   const transitionStyle = {
     opacity: routeAnim,
@@ -554,7 +615,7 @@ export default function App() {
     });
     setBusy(null);
     if (error) {
-      Alert.alert("Binance connection failed", error.message);
+      Alert.alert("Binance connection failed", await formatFunctionError(error));
       return;
     }
     setBinanceKey("");
@@ -578,6 +639,38 @@ export default function App() {
     const isShort = marketDirection === "short";
     const r = Math.abs(entry - stop);
     const takeProfit = isShort ? entry - r * 3 : entry + r * 3;
+    Alert.alert(
+      "Confirm order request",
+      `${marketDirection.toUpperCase()} ${symbol}\nEntry ${formatPrice(entry)}\nStop ${formatPrice(stop)}\nTP3 ${formatPrice(takeProfit)}\nWallet ${label(wallet)}`,
+      [
+        { text: "Cancel", style: "cancel" },
+        {
+          text: "Confirm",
+          onPress: () => {
+            void createMarketDecision({ entry, isShort, r, riskPct, stop, symbol, takeProfit });
+          },
+        },
+      ],
+    );
+  }, [marketDirection, marketEntry, marketRisk, marketStop, marketSymbol, wallet]);
+
+  const createMarketDecision = useCallback(async ({
+    entry,
+    isShort,
+    r,
+    riskPct,
+    stop,
+    symbol,
+    takeProfit,
+  }: {
+    entry: number;
+    isShort: boolean;
+    r: number;
+    riskPct: number;
+    stop: number;
+    symbol: string;
+    takeProfit: number;
+  }) => {
     setBusy("market-order");
     const userResult = await supabase.auth.getUser();
     const userId = userResult.data.user?.id;
@@ -620,7 +713,7 @@ export default function App() {
     }
     await loadDashboard();
     setActiveTab("decisions");
-  }, [loadDashboard, marketDirection, marketEntry, marketRisk, marketStop, marketSymbol, wallet]);
+  }, [loadDashboard, marketDirection, wallet]);
 
   useEffect(() => {
     if (selectedTrade) {
@@ -746,18 +839,18 @@ export default function App() {
         style={transitionStyle}
       >
         <View style={styles.header}>
-          <Pressable onPress={() => setDrawerOpen(true)} style={styles.iconButton}>
-            <Text style={styles.iconButtonText}>M</Text>
+          <Pressable onPress={openDrawer} style={styles.iconButtonBare}>
+            <HamburgerIcon />
           </Pressable>
           <View style={styles.headerCopy}>
             <Text style={styles.kicker}>Lucrandos AI trading OS</Text>
             <Text style={styles.heading}>Command</Text>
           </View>
           <View style={styles.headerActions}>
-            <Pressable onPress={() => Alert.alert("Notifications", "Notification center is ready for trade alerts.")} style={styles.iconButton}>
-              <Text style={styles.iconButtonText}>N</Text>
+            <Pressable onPress={() => Alert.alert("Notifications", "Notification center is ready for trade alerts.")} style={styles.iconButtonBare}>
+              <BellIcon />
             </Pressable>
-            <Pressable onPress={() => setProfileOpen(true)} style={styles.profileButton}>
+            <Pressable onPress={openProfile} style={styles.profileButton}>
               <Text style={styles.profileButtonText}>{(accountEmail || email || "L").slice(0, 1).toUpperCase()}</Text>
             </Pressable>
           </View>
@@ -799,9 +892,12 @@ export default function App() {
 
         {activeTab === "markets" ? (
           <MarketsPanel
+            book={marketBook}
             busy={busy}
+            candles={marketCandles}
             direction={marketDirection}
             entry={marketEntry}
+            move={moves[normalizeMarketSymbol(marketSymbol)]}
             onSubmit={submitMarketOrder}
             risk={marketRisk}
             setDirection={setMarketDirection}
@@ -833,6 +929,8 @@ export default function App() {
         {activeTab === "paper" ? (
           <PaperControls
             busy={busy}
+            onStartAutonomous={() => setPaperAutonomous("start")}
+            onStopAutonomous={() => setPaperAutonomous("stop")}
             paperAccount={paperAccount}
             portfolio={portfolio}
             resetPaperAccount={resetPaperAccount}
@@ -992,12 +1090,16 @@ function LiquidTabs({ activeTab, setActiveTab }: { activeTab: Tab; setActiveTab:
 
 function PaperControls({
   busy,
+  onStartAutonomous,
+  onStopAutonomous,
   paperAccount,
   portfolio,
   resetPaperAccount,
   walletTrades,
 }: {
   busy: string | null;
+  onStartAutonomous: () => void;
+  onStopAutonomous: () => void;
   paperAccount: PaperAccount | null;
   portfolio: ReturnType<typeof usePortfolioShape>;
   resetPaperAccount: () => void;
@@ -1026,6 +1128,14 @@ function PaperControls({
         <Pressable disabled={busy === "paper-reset"} onPress={resetPaperAccount} style={styles.dangerButtonFull}>
           <Text style={styles.dangerButtonText}>{busy === "paper-reset" ? "Resetting..." : "Reset paper account"}</Text>
         </Pressable>
+        <View style={styles.actionRow}>
+          <Pressable disabled={busy === "paper-start"} onPress={onStartAutonomous} style={styles.primaryButtonSmall}>
+            <Text style={styles.primaryButtonText}>{busy === "paper-start" ? "Starting..." : "Start autonomous"}</Text>
+          </Pressable>
+          <Pressable disabled={busy === "paper-stop"} onPress={onStopAutonomous} style={styles.dangerButtonSmall}>
+            <Text style={styles.dangerButtonText}>{busy === "paper-stop" ? "Stopping..." : "Stop autonomous"}</Text>
+          </Pressable>
+        </View>
       </View>
 
       <View style={styles.card}>
@@ -1131,9 +1241,12 @@ function usePortfolioShape() {
 }
 
 function MarketsPanel({
+  book,
   busy,
+  candles,
   direction,
   entry,
+  move,
   onSubmit,
   risk,
   setDirection,
@@ -1145,9 +1258,12 @@ function MarketsPanel({
   symbol,
   wallet,
 }: {
+  book: MarketBook | null;
   busy: string | null;
+  candles: MarketCandle[];
   direction: "long" | "short";
   entry: string;
+  move?: MarketMove;
   onSubmit: () => void;
   risk: string;
   setDirection: (value: "long" | "short") => void;
@@ -1170,12 +1286,42 @@ function MarketsPanel({
     <View style={styles.stack}>
       <View style={styles.card}>
         <SectionTitle title="Markets" value={label(wallet)} />
+        <View style={styles.rowBetween}>
+          <View>
+            <Text style={styles.symbol}>{normalizeMarketSymbol(symbol)}</Text>
+            <Text style={styles.meta}>Last {formatPrice(move?.lastPrice)} / {percent(move?.change24h)} 24h</Text>
+          </View>
+          <Badge tone={(move?.change24h ?? 0) >= 0 ? "good" : "bad"}>{(move?.change24h ?? 0) >= 0 ? "Up" : "Down"}</Badge>
+        </View>
+        <ScrollView horizontal showsHorizontalScrollIndicator={false}>
+          <View style={styles.walletRow}>
+            {marketPairs.map((pair) => (
+              <Pressable key={pair} onPress={() => setSymbol(pair)} style={[styles.marketPairChip, normalizeMarketSymbol(symbol) === pair && styles.marketPairChipActive]}>
+                <Text style={[styles.walletChipText, normalizeMarketSymbol(symbol) === pair && styles.walletChipTextActive]}>{pair.replace("USDT", "")}</Text>
+              </Pressable>
+            ))}
+          </View>
+        </ScrollView>
         <Field label="Symbol" value={symbol} onChangeText={setSymbol} />
+        <MiniChart candles={candles} />
+        <View style={styles.detailGrid}>
+          <Metric label="Bid" value={book ? formatPrice(book.bidPrice) : "--"} />
+          <Metric label="Ask" value={book ? formatPrice(book.askPrice) : "--"} />
+          <Metric label="Spread" value={book ? formatPrice(book.askPrice - book.bidPrice) : "--"} />
+        </View>
+        <View style={styles.depthBar}>
+          <View style={[styles.depthBid, { flex: Math.max(1, book?.bidQty ?? 1) }]} />
+          <View style={[styles.depthAsk, { flex: Math.max(1, book?.askQty ?? 1) }]} />
+        </View>
+        <View style={styles.cardFooter}>
+          <Text style={styles.goodText}>Buy pressure {depthPercent(book?.bidQty, book)}%</Text>
+          <Text style={styles.badText}>Sell pressure {depthPercent(book?.askQty, book)}%</Text>
+        </View>
         <View style={styles.actionRow}>
-          <Pressable onPress={() => setDirection("long")} style={[styles.actionButton, direction === "long" && styles.actionButtonActive]}>
+          <Pressable onPress={() => setDirection("long")} style={[styles.actionButton, direction === "long" && styles.actionButtonLongActive]}>
             <Text style={styles.actionButtonText}>Long</Text>
           </Pressable>
-          <Pressable onPress={() => setDirection("short")} style={[styles.actionButton, direction === "short" && styles.actionButtonActive]}>
+          <Pressable onPress={() => setDirection("short")} style={[styles.actionButton, direction === "short" && styles.actionButtonShortActive]}>
             <Text style={styles.actionButtonText}>Short</Text>
           </Pressable>
         </View>
@@ -1282,6 +1428,57 @@ function ProfileMenu({ close, email, onSignOut, open, profileX }: { close: () =>
           <Text style={styles.ghostButtonText}>Sign out</Text>
         </Pressable>
       </Animated.View>
+    </View>
+  );
+}
+
+function HamburgerIcon() {
+  return (
+    <View style={styles.hamburgerIcon}>
+      <View style={styles.hamburgerLine} />
+      <View style={styles.hamburgerLine} />
+      <View style={styles.hamburgerLine} />
+    </View>
+  );
+}
+
+function BellIcon() {
+  return (
+    <View style={styles.bellIcon}>
+      <View style={styles.bellDome} />
+      <View style={styles.bellBody} />
+      <View style={styles.bellDot} />
+    </View>
+  );
+}
+
+function MiniChart({ candles }: { candles: MarketCandle[] }) {
+  if (!candles.length) {
+    return (
+      <View style={styles.chartBox}>
+        <Text style={styles.muted}>Chart loading</Text>
+      </View>
+    );
+  }
+
+  const values = candles.map((item) => item.close);
+  const min = Math.min(...values);
+  const max = Math.max(...values);
+  const range = Math.max(max - min, 0.000001);
+
+  return (
+    <View style={styles.chartBox}>
+      <View style={styles.chartBars}>
+        {candles.map((item, index) => {
+          const height = 18 + ((item.close - min) / range) * 82;
+          const up = item.close >= item.open;
+          return <View key={`${item.time}-${index}`} style={[styles.chartBar, { height }, up ? styles.chartBarUp : styles.chartBarDown]} />;
+        })}
+      </View>
+      <View style={styles.cardFooter}>
+        <Text style={styles.muted}>{formatPrice(min)}</Text>
+        <Text style={styles.muted}>{formatPrice(max)}</Text>
+      </View>
     </View>
   );
 }
@@ -1713,6 +1910,30 @@ function trimNumber(value: number) {
   return Number(value.toFixed(8));
 }
 
+function depthPercent(value: number | undefined, book: MarketBook | null) {
+  const total = (book?.bidQty ?? 0) + (book?.askQty ?? 0);
+  if (!total || !value) return 50;
+  return Math.round((value / total) * 100);
+}
+
+async function formatFunctionError(error: unknown) {
+  const fallback = error instanceof Error ? error.message : "Edge function failed";
+  const context = (error as { context?: Response | { clone?: () => Response } } | null)?.context;
+  if (!context || typeof (context as Response).clone !== "function") return fallback;
+  try {
+    const payload = await (context as Response).clone().json() as { error?: unknown; message?: unknown; code?: unknown };
+    const message = typeof payload.error === "string"
+      ? payload.error
+      : typeof payload.message === "string"
+        ? payload.message
+        : fallback;
+    const code = typeof payload.code === "string" ? ` (${payload.code})` : "";
+    return `${message}${code}`;
+  } catch {
+    return fallback;
+  }
+}
+
 function currency(value: number) {
   const sign = value < 0 ? "-" : "";
   return `${sign}$${Math.abs(value).toLocaleString("en-US", { maximumFractionDigits: 2 })}`;
@@ -1788,6 +2009,7 @@ const styles = StyleSheet.create({
   ghostButton: { borderRadius: 10, borderWidth: 1, borderColor: "rgba(255,255,255,0.12)", paddingHorizontal: 12, paddingVertical: 10 },
   ghostButtonText: { color: "#e4e4e7", fontWeight: "700" },
   iconButton: { width: 40, height: 40, borderRadius: 14, alignItems: "center", justifyContent: "center", borderWidth: 1, borderColor: "rgba(255,255,255,0.14)", backgroundColor: "rgba(255,255,255,0.08)" },
+  iconButtonBare: { width: 40, height: 40, alignItems: "center", justifyContent: "center" },
   iconButtonText: { color: "#fafafa", fontWeight: "900" },
   profileButton: { width: 40, height: 40, borderRadius: 20, alignItems: "center", justifyContent: "center", backgroundColor: "#f4f4f5" },
   profileButtonText: { color: "#09090b", fontWeight: "900" },
@@ -1810,6 +2032,17 @@ const styles = StyleSheet.create({
   walletChipActive: { backgroundColor: "#f4f4f5", borderColor: "#f4f4f5" },
   walletChipText: { color: "#a1a1aa", fontSize: 12, fontWeight: "800" },
   walletChipTextActive: { color: "#09090b" },
+  marketPairChip: {
+    minWidth: 62,
+    borderRadius: 10,
+    borderWidth: 1,
+    borderColor: "rgba(255,255,255,0.1)",
+    backgroundColor: "rgba(255,255,255,0.05)",
+    paddingHorizontal: 12,
+    paddingVertical: 10,
+    alignItems: "center",
+  },
+  marketPairChipActive: { backgroundColor: "#f4f4f5", borderColor: "#f4f4f5" },
   dot: { width: 7, height: 7, borderRadius: 7 },
   dotGood: { backgroundColor: "#5eead4" },
   dotMuted: { backgroundColor: "#52525b" },
@@ -1921,6 +2154,8 @@ const styles = StyleSheet.create({
   actionWrap: { flexDirection: "row", flexWrap: "wrap", gap: 8 },
   actionButton: { minWidth: "30%", flexGrow: 1, borderRadius: 10, alignItems: "center", justifyContent: "center", backgroundColor: "rgba(255,255,255,0.08)", borderWidth: 1, borderColor: "rgba(255,255,255,0.12)", paddingVertical: 12 },
   actionButtonActive: { backgroundColor: "rgba(94,234,212,0.18)", borderColor: "rgba(94,234,212,0.38)" },
+  actionButtonLongActive: { backgroundColor: "rgba(16,185,129,0.24)", borderColor: "rgba(110,231,183,0.46)" },
+  actionButtonShortActive: { backgroundColor: "rgba(244,63,94,0.24)", borderColor: "rgba(251,113,133,0.48)" },
   actionButtonDanger: { backgroundColor: "rgba(251,113,133,0.14)", borderColor: "rgba(251,113,133,0.3)" },
   actionButtonText: { color: "#fafafa", fontWeight: "800" },
   disabledButton: { opacity: 0.42 },
@@ -1941,4 +2176,18 @@ const styles = StyleSheet.create({
   drawerItemActive: { backgroundColor: "rgba(94,234,212,0.18)" },
   drawerItemText: { color: "#fafafa", fontWeight: "800" },
   profileAvatar: { width: 62, height: 62, borderRadius: 31, alignItems: "center", justifyContent: "center", backgroundColor: "#f4f4f5" },
+  hamburgerIcon: { width: 22, gap: 4 },
+  hamburgerLine: { height: 2, borderRadius: 2, backgroundColor: "#fafafa" },
+  bellIcon: { width: 24, height: 24, alignItems: "center", justifyContent: "center" },
+  bellDome: { width: 13, height: 9, borderTopLeftRadius: 8, borderTopRightRadius: 8, borderWidth: 2, borderBottomWidth: 0, borderColor: "#fafafa" },
+  bellBody: { width: 17, height: 7, borderRadius: 4, borderWidth: 2, borderColor: "#fafafa" },
+  bellDot: { marginTop: 1, width: 4, height: 4, borderRadius: 2, backgroundColor: "#fafafa" },
+  chartBox: { minHeight: 150, borderRadius: 12, borderWidth: 1, borderColor: "rgba(255,255,255,0.1)", backgroundColor: "rgba(0,0,0,0.18)", padding: 12, justifyContent: "center" },
+  chartBars: { height: 108, flexDirection: "row", alignItems: "flex-end", gap: 2 },
+  chartBar: { flex: 1, minWidth: 2, borderRadius: 3 },
+  chartBarUp: { backgroundColor: "rgba(110,231,183,0.86)" },
+  chartBarDown: { backgroundColor: "rgba(251,113,133,0.86)" },
+  depthBar: { height: 12, flexDirection: "row", overflow: "hidden", borderRadius: 10, backgroundColor: "rgba(255,255,255,0.08)" },
+  depthBid: { backgroundColor: "rgba(110,231,183,0.82)" },
+  depthAsk: { backgroundColor: "rgba(251,113,133,0.82)" },
 });
