@@ -7,10 +7,23 @@ import "./globals.css";
 import { Providers } from "./providers";
 
 export const metadata: Metadata = {
-  title: "lucrandos - Admin",
-  description: "lucrandos platform operations dashboard",
-  // Don't index admin
-  robots: { index: false, follow: false },
+  metadataBase: new URL("https://admin.lucrandos.com"),
+  title: {
+    default: "Lucrandos Admin",
+    template: "%s | Lucrandos Admin",
+  },
+  description:
+    "Private Lucrandos operations dashboard for platform administration, queue monitoring, agent oversight, and trading system controls.",
+  robots: {
+    index: false,
+    follow: false,
+    nocache: true,
+    googleBot: {
+      index: false,
+      follow: false,
+      noimageindex: true,
+    },
+  },
 };
 
 export default function RootLayout({ children }: { children: ReactNode }) {

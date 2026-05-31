@@ -7,8 +7,23 @@ import "./globals.css";
 import { Providers } from "./providers";
 
 export const metadata: Metadata = {
-  title: "lucrandos - Dashboard",
-  description: "lucrandos customer dashboard",
+  metadataBase: new URL("https://customer.lucrandos.com"),
+  title: {
+    default: "Lucrandos Command Center",
+    template: "%s | Lucrandos Command Center",
+  },
+  description:
+    "Secure Lucrandos customer dashboard for AI trading decisions, paper positions, wallet status, manual approvals, and trade lifecycle controls.",
+  robots: {
+    index: false,
+    follow: false,
+    nocache: true,
+    googleBot: {
+      index: false,
+      follow: false,
+      noimageindex: true,
+    },
+  },
 };
 
 export default function RootLayout({ children }: { children: ReactNode }) {

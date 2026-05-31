@@ -110,6 +110,51 @@ const fallbackMoves: Record<string, MarketMove> = {
   SOLUSDT: { symbol: "SOLUSDT", change24h: 4.16 },
 };
 
+const siteUrl = "https://lucrandos.com";
+
+const structuredData = [
+  {
+    "@context": "https://schema.org",
+    "@type": "Organization",
+    name: "Lucrandos",
+    url: siteUrl,
+    logo: `${siteUrl}/icon.svg`,
+    sameAs: [siteUrl],
+  },
+  {
+    "@context": "https://schema.org",
+    "@type": "SoftwareApplication",
+    name: "Lucrandos AI Trading System",
+    applicationCategory: "FinanceApplication",
+    operatingSystem: "Web, iOS, Android",
+    url: siteUrl,
+    description:
+      "A multi-agent AI trading system for crypto market decisions, paper trading, risk management, live decision review, and automated trade lifecycle monitoring.",
+    featureList: [
+      "Multi-agent trading decisions",
+      "Paper and shadow trading workflows",
+      "Risk managed position lifecycle monitoring",
+      "Closed trade R-multiple reporting",
+      "Live crypto market momentum tracking",
+      "Manual approval and operator control flows",
+    ],
+    offers: {
+      "@type": "Offer",
+      url: `${siteUrl}/pricing`,
+      availability: "https://schema.org/OnlineOnly",
+      priceCurrency: "USD",
+    },
+  },
+  {
+    "@context": "https://schema.org",
+    "@type": "WebSite",
+    name: "Lucrandos",
+    url: siteUrl,
+    description:
+      "Lucrandos publishes live AI trading decisions, closed trade outcomes, market momentum, and risk controlled trading system activity.",
+  },
+];
+
 function getCustomerSignInUrl() {
   const configuredUrl = process.env.NEXT_PUBLIC_CUSTOMER_URL?.replace(/\/$/, "");
   const customerUrl =
@@ -318,7 +363,12 @@ export default async function HomePage() {
   const positiveClosedTrades = closedTrades.filter((trade) => Number(trade.r_multiple) > 0).length;
 
   return (
-    <main className="min-h-screen overflow-hidden bg-[#07090b] text-zinc-50">
+    <>
+      <script
+        type="application/ld+json"
+        dangerouslySetInnerHTML={{ __html: JSON.stringify(structuredData) }}
+      />
+      <main className="min-h-screen overflow-hidden bg-[#07090b] text-zinc-50">
       <div className="pointer-events-none fixed inset-0 bg-[linear-gradient(rgba(255,255,255,0.055)_1px,transparent_1px),linear-gradient(90deg,rgba(255,255,255,0.055)_1px,transparent_1px)] bg-[size:72px_72px] opacity-40" />
       <div className="pointer-events-none fixed inset-x-0 top-0 h-80 bg-[radial-gradient(circle_at_35%_20%,rgba(20,184,166,0.18),transparent_34%),radial-gradient(circle_at_74%_8%,rgba(251,191,36,0.13),transparent_28%)]" />
 
@@ -349,7 +399,7 @@ export default async function HomePage() {
           </div>
         </nav>
 
-        <section className="grid flex-1 items-center gap-9 py-10 lg:grid-cols-[0.9fr_1.1fr] lg:py-14">
+        <section id="live-system" className="grid flex-1 items-center gap-9 py-10 lg:grid-cols-[0.9fr_1.1fr] lg:py-14">
           <div className="max-w-2xl space-y-7">
             <div className="inline-flex items-center gap-2 rounded-lg border border-emerald-300/25 bg-emerald-300/10 px-3 py-2 text-xs font-semibold uppercase tracking-[0.14em] text-emerald-100">
               <span className="h-2 w-2 rounded-full bg-emerald-300 shadow-[0_0_18px_rgba(110,231,183,0.85)]" />
@@ -357,10 +407,10 @@ export default async function HomePage() {
             </div>
             <div className="space-y-5">
               <h1 className="text-5xl font-semibold leading-[0.96] tracking-[0] text-zinc-50 sm:text-6xl lg:text-7xl">
-                Market actions, risk results, and coin momentum on one screen.
+                AI trading system for live decisions, risk results, and coin momentum.
               </h1>
               <p className="max-w-xl text-base leading-8 text-zinc-300">
-                Lucrandos shows the latest agent decisions, closed trade outcomes, and the 24 hour market move behind each symbol.
+                Lucrandos shows the latest multi-agent trading decisions, closed trade outcomes, risk status, and the 24 hour market move behind each crypto symbol.
               </p>
             </div>
             <div className="grid max-w-xl grid-cols-3 gap-3">
@@ -475,6 +525,7 @@ export default async function HomePage() {
           </div>
         </section>
       </div>
-    </main>
+      </main>
+    </>
   );
 }
