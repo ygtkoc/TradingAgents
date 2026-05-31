@@ -7,6 +7,8 @@ import { Badge, Button, Card, CardContent, CardDescription, CardHeader, CardTitl
 
 import { supabase } from "@/lib/supabase/client";
 
+const SOURCE_TYPES = new Set(["note", "article", "video_transcript", "pdf", "strategy", "post_trade"]);
+
 const TAG_RULES: Array<[string, string[]]> = [
   ["risk", ["risk", "stop", "invalid", "rr", "reward", "loss"]],
   ["stop-loss", ["stop", "invalidation", "invalidasyon"]],
@@ -25,6 +27,7 @@ export default function AdminTradingBrainPage() {
   const [title, setTitle] = useState("");
   const [sourceType, setSourceType] = useState("note");
   const [content, setContent] = useState("");
+  const [importResult, setImportResult] = useState<string | null>(null);
 
   const sourcesQ = useQuery({
     queryKey: ["admin", "trading-brain", "sources"],
@@ -58,51 +61,68 @@ export default function AdminTradingBrainPage() {
       const cleanContent = content.trim();
       if (cleanContent.length < 40) throw new Error("Content is too short.");
 
-      const { data: source, error: sourceError } = await supabase
-        .from("trading_knowledge_sources")
-        .insert({
-          user_id: null,
-          title: title.trim() || "Global trading knowledge",
-          source_type: sourceType,
-          content_text: cleanContent,
-          metadata: { scope: "global", imported_from: "admin_panel" },
-        })
-        .select("id")
-        .single();
-      if (sourceError || !source) throw sourceError ?? new Error("Source insert failed");
+      const records = parseImportRecords(cleanContent, {
+        title: title.trim() || "Global trading knowledge",
+        sourceType,
+      });
 
-      const chunks = chunkText(cleanContent).map((chunk, index) => ({
-        source_id: source.id,
-        user_id: null,
-        chunk_index: index,
-        content: chunk,
-        tags: tagsFor(chunk),
-        metadata: { scope: "global" },
-      }));
+      const { data: sources, error: sourceError } = await supabase
+        .from("trading_knowledge_sources")
+        .insert(records.map((record) => ({
+          user_id: null,
+          title: record.title,
+          source_type: record.source_type,
+          content_text: record.content_text,
+          metadata: {
+            ...record.metadata,
+            scope: "global",
+            imported_from: "admin_panel",
+            import_format: record.import_format,
+          },
+        })))
+        .select("id,title,content_text,metadata");
+      if (sourceError || !sources?.length) throw sourceError ?? new Error("Source insert failed");
+
+      const chunks = sources.flatMap((source) =>
+        chunkText(source.content_text).map((chunk, index) => ({
+          source_id: source.id,
+          user_id: null,
+          chunk_index: index,
+          content: chunk,
+          tags: tagsFor(chunk, source.metadata),
+          metadata: { scope: "global", source_title: source.title },
+        })),
+      );
       const { error: chunkError } = await supabase.from("trading_knowledge_chunks").insert(chunks);
       if (chunkError) throw chunkError;
 
-      const rules = extractRules(cleanContent).map((rule, index) => ({
-        user_id: null,
-        source_id: source.id,
-        rule_code: `global_${source.id.slice(0, 8)}_${index + 1}`,
-        title: rule.title,
-        rule_text: rule.text,
-        category: rule.category,
-        severity: rule.severity,
-        weight: rule.weight,
-        metadata: { scope: "global", extracted_from: "admin_heuristic_v1" },
-      }));
+      const rules = sources.flatMap((source) =>
+        extractRules(source.content_text, source.title, source.metadata).map((rule, index) => ({
+          user_id: null,
+          source_id: source.id,
+          rule_code: uniqueRuleCode(source.id, index, rule.title),
+          title: rule.title,
+          rule_text: rule.text,
+          category: rule.category,
+          severity: rule.severity,
+          weight: rule.weight,
+          metadata: { scope: "global", extracted_from: "admin_import_v2" },
+        })),
+      );
       if (rules.length) {
         const { error: ruleError } = await supabase.from("trading_strategy_rules").insert(rules);
         if (ruleError) throw ruleError;
       }
+
+      return { sources: sources.length, chunks: chunks.length, rules: rules.length };
     },
-    onSuccess: () => {
+    onSuccess: (result) => {
       setTitle("");
       setContent("");
+      setImportResult(`Imported ${result.sources} sources, ${result.chunks} chunks, and ${result.rules} rules.`);
       void qc.invalidateQueries({ queryKey: ["admin", "trading-brain"] });
     },
+    onMutate: () => setImportResult(null),
   });
 
   const stats = useMemo(() => {
@@ -133,7 +153,8 @@ export default function AdminTradingBrainPage() {
           <CardHeader>
             <CardTitle>Import global knowledge</CardTitle>
             <CardDescription>
-              Paste trading education, strategy rules, video transcript text, or post-trade lessons. These become global rules for all bots.
+              Paste plain education text or a JSON array of records with title, source_type, content_text, and metadata.
+              JSON imports become separate global sources for all bots.
             </CardDescription>
           </CardHeader>
           <CardContent className="space-y-3">
@@ -151,10 +172,21 @@ export default function AdminTradingBrainPage() {
             </select>
             <textarea
               className="min-h-72 w-full rounded-md border border-border bg-background px-3 py-3 font-mono text-xs text-foreground outline-none placeholder:text-muted-foreground"
-              placeholder="Paste content here..."
+              placeholder={`Paste content here, or JSON like:
+[
+  {
+    "title": "Bull Flag Pattern",
+    "source_type": "strategy",
+    "content_text": "Entry occurs on breakout...",
+    "metadata": { "category": "chart_pattern", "tags": ["breakout"], "priority": "high" }
+  }
+]`}
               value={content}
               onChange={(event) => setContent(event.target.value)}
             />
+            {importResult ? (
+              <p className="rounded-md border border-success/25 bg-success/10 px-3 py-2 text-sm text-success">{importResult}</p>
+            ) : null}
             {importMutation.isError ? (
               <p className="text-sm text-destructive">{(importMutation.error as Error).message}</p>
             ) : null}
@@ -237,17 +269,95 @@ function chunkText(value: string) {
   return chunks.slice(0, 100);
 }
 
-function tagsFor(value: string) {
-  const lower = value.toLowerCase();
-  return TAG_RULES.filter(([, terms]) => terms.some((term) => lower.includes(term))).map(([tag]) => tag);
+type ImportRecord = {
+  title: string;
+  source_type: string;
+  content_text: string;
+  metadata: Record<string, unknown>;
+  import_format: "plain_text" | "json_array";
+};
+
+function parseImportRecords(value: string, fallback: { title: string; sourceType: string }): ImportRecord[] {
+  const trimmed = value.trim();
+  if (trimmed.startsWith("[") || trimmed.startsWith("{")) {
+    let parsed: unknown;
+    try {
+      parsed = JSON.parse(trimmed);
+    } catch (error) {
+      throw new Error(`Invalid JSON: ${(error as Error).message}`);
+    }
+    const rows = Array.isArray(parsed) ? parsed : [parsed];
+    if (!rows.length) throw new Error("JSON import is empty.");
+    return rows.map((row, index) => normalizeJsonRecord(row, index));
+  }
+
+  return [{
+    title: fallback.title,
+    source_type: fallback.sourceType,
+    content_text: trimmed,
+    metadata: {},
+    import_format: "plain_text",
+  }];
 }
 
-function extractRules(value: string) {
+function normalizeJsonRecord(row: unknown, index: number): ImportRecord {
+  if (!row || typeof row !== "object") {
+    throw new Error(`JSON row ${index + 1} must be an object.`);
+  }
+  const record = row as Record<string, unknown>;
+  const title = String(record.title ?? "").trim();
+  const contentText = String(record.content_text ?? record.content ?? "").trim();
+  const rawSourceType = String(record.source_type ?? "note").trim();
+  const sourceType = SOURCE_TYPES.has(rawSourceType) ? rawSourceType : "note";
+  const metadata = isPlainObject(record.metadata)
+    ? { ...(record.metadata as Record<string, unknown>) }
+    : {};
+
+  if (!title) throw new Error(`JSON row ${index + 1} is missing title.`);
+  if (contentText.length < 20) throw new Error(`JSON row ${index + 1} content_text is too short.`);
+
+  return {
+    title,
+    source_type: sourceType,
+    content_text: contentText,
+    metadata,
+    import_format: "json_array",
+  };
+}
+
+function isPlainObject(value: unknown) {
+  return !!value && typeof value === "object" && !Array.isArray(value);
+}
+
+function tagsFor(value: string, metadata?: unknown) {
+  const lower = value.toLowerCase();
+  const extracted = TAG_RULES.filter(([, terms]) => terms.some((term) => lower.includes(term))).map(([tag]) => tag);
+  const metadataTags = isPlainObject(metadata) && Array.isArray((metadata as Record<string, unknown>).tags)
+    ? ((metadata as Record<string, unknown>).tags as unknown[]).map((tag) => String(tag)).filter(Boolean)
+    : [];
+  return Array.from(new Set([...metadataTags, ...extracted])).slice(0, 16);
+}
+
+function extractRules(value: string, sourceTitle: string, metadata?: unknown) {
+  const meta = isPlainObject(metadata) ? metadata as Record<string, unknown> : {};
+  const priority = String(meta.priority ?? "").toLowerCase();
+  const category = String(meta.category ?? "").toLowerCase() || tagsFor(value, metadata)[0] || "general";
+  const shouldCreateKnowledgeRule = ["critical", "high"].includes(priority);
+  const metadataRule = shouldCreateKnowledgeRule
+    ? [{
+        title: sourceTitle.slice(0, 80),
+        text: value,
+        category,
+        severity: priority === "critical" ? "critical" : "high",
+        weight: priority === "critical" ? 24 : 16,
+      }]
+    : [];
+
   const sentences = value
     .split(/(?<=[.!?])\s+|\n+/)
     .map((item) => item.trim())
     .filter((item) => item.length > 28);
-  return sentences
+  const heuristicRules = sentences
     .filter((sentence) => /(must|should|never|avoid|required|risk|stop|invalid|rr|tp|gerek|asla|kaçın|stop|risk)/i.test(sentence))
     .slice(0, 18)
     .map((sentence) => {
@@ -262,4 +372,14 @@ function extractRules(value: string) {
         weight: critical ? 18 : 10,
       };
     });
+  return [...metadataRule, ...heuristicRules].slice(0, 6);
+}
+
+function uniqueRuleCode(sourceId: string, index: number, title: string) {
+  const slug = title
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "_")
+    .replace(/^_+|_+$/g, "")
+    .slice(0, 32) || "rule";
+  return `global_${sourceId.slice(0, 8)}_${index + 1}_${slug}`;
 }
