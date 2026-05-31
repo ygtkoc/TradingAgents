@@ -18,11 +18,30 @@ export function useExchangeConnections() {
     queryFn: async () => {
       const { data, error } = await supabase
         .from("exchange_accounts")
-        .select("id,user_id,bot_id,exchange,label,is_active,can_trade,can_withdraw,withdrawal_detected,metadata")
+        .select(
+          [
+            "id",
+            "user_id",
+            "exchange_name",
+            "account_label",
+            "connection_status",
+            "can_read",
+            "can_trade",
+            "can_withdraw",
+            "withdrawal_detected",
+            "last_health_check_at",
+            "last_health_status",
+            "health_error_message",
+            "ip_whitelist_configured",
+            "testnet",
+            "is_active",
+            "metadata",
+          ].join(","),
+        )
         .eq("user_id", user!.id)
         .order("created_at", { ascending: false });
       if (error) throw error;
-      return (data ?? []) as ExchangeAccountSafe[];
+      return (data ?? []) as unknown as ExchangeAccountSafe[];
     },
   });
 }

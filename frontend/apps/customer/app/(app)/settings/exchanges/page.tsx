@@ -15,7 +15,7 @@ const PROVIDERS = [
 export default function ExchangesPage() {
   const conns = useExchangeConnections();
 
-  const byExchange = new Map((conns.data ?? []).map((c) => [c.exchange.toLowerCase(), c]));
+  const byExchange = new Map((conns.data ?? []).map((c) => [c.exchange_name.toLowerCase(), c]));
 
   return (
     <ProductPage size="xl">

@@ -193,16 +193,22 @@ export interface UserSettings {
 
 // ── Exchange account (frontend reads via SAFE view; never raw key columns) ───
 export interface ExchangeAccountSafe {
-  id:                  UUID;
-  user_id:             UUID;
-  bot_id:              UUID | null;
-  exchange:            string;
-  label:               string | null;
-  is_active:           boolean;
-  can_trade:           boolean;
-  can_withdraw:        boolean;
-  withdrawal_detected: boolean;
-  metadata:            Record<string, unknown>;
+  id:                       UUID;
+  user_id:                  UUID;
+  exchange_name:            string;
+  account_label:            string;
+  connection_status:        string;
+  can_read:                 boolean;
+  can_trade:                boolean;
+  can_withdraw:             boolean;
+  withdrawal_detected:      boolean;
+  last_health_check_at:     ISO8601 | null;
+  last_health_status:       string | null;
+  health_error_message:     string | null;
+  ip_whitelist_configured:  boolean;
+  testnet:                  boolean;
+  is_active:                boolean;
+  metadata:                 Record<string, unknown>;
   // NOTE: encrypted_api_key, encrypted_api_secret, key_iv are NEVER exposed.
 }
 

@@ -60,7 +60,7 @@ export default function NewBotPage() {
 
   // Live mode requires at least one connected exchange that allows trading.
   const liveEligible =
-    (conns.data ?? []).some((c) => c.exchange.toLowerCase() === form.exchange && c.is_active && c.can_trade);
+    (conns.data ?? []).some((c) => c.exchange_name.toLowerCase() === form.exchange && c.is_active && c.can_trade);
 
   const onSubmit = async (e: FormEvent) => {
     e.preventDefault();

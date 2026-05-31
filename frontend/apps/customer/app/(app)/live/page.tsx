@@ -105,8 +105,8 @@ export default function LiveTradingPage() {
               {conns.data!.map((connection) => (
                 <li key={connection.id} className="flex flex-col gap-3 p-4 text-sm sm:flex-row sm:items-center sm:justify-between">
                   <div>
-                    <div className="font-medium">{connection.label ?? connection.exchange}</div>
-                    <div className="text-xs text-muted-foreground">{connection.exchange}</div>
+                    <div className="font-medium">{connection.account_label}</div>
+                    <div className="text-xs text-muted-foreground">{connection.exchange_name}</div>
                   </div>
                   <div className="flex flex-wrap items-center gap-2">
                     {connection.can_trade

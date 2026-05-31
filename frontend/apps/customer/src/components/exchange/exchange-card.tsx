@@ -87,15 +87,22 @@ export function ExchangeCard({ exchange, label, blurb, connection }: Props) {
         {isConnected ? (
           <>
             <div className="space-y-1.5 rounded-xl border border-border/30 bg-card/40 px-3 py-2.5 text-[12px]">
-              {connection!.label ? (
+              {connection!.account_label ? (
                 <div className="flex justify-between">
                   <span className="text-muted-foreground/60">Label</span>
-                  <span className="font-medium text-foreground">{connection!.label}</span>
+                  <span className="font-medium text-foreground">{connection!.account_label}</span>
                 </div>
               ) : null}
               <div className="flex justify-between">
+                <span className="text-muted-foreground/60">Status</span>
+                <span className="font-medium text-foreground">{connection!.connection_status}</span>
+              </div>
+              <div className="flex justify-between">
                 <span className="text-muted-foreground/60">Permissions</span>
                 <div className="flex items-center gap-1">
+                  {connection!.can_read
+                    ? <Badge variant="success" className="text-[9px]">read</Badge>
+                    : <Badge variant="secondary" className="text-[9px]">no-read</Badge>}
                   {connection!.can_trade
                     ? <Badge variant="success" className="text-[9px]">trade</Badge>
                     : <Badge variant="secondary" className="text-[9px]">read-only</Badge>}

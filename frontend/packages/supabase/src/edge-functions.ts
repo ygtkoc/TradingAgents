@@ -65,7 +65,7 @@ async function invoke<TRequest, TResponse>(
       ? crypto.randomUUID()
       : `${Date.now()}-${Math.random().toString(36).slice(2)}`;
 
-  const { data, error } = await sb.functions.invoke<EdgeFunctionResult<TResponse>>(fn, {
+  const { data, error } = await sb.functions.invoke<EdgeFunctionResult<TResponse> | TResponse>(fn, {
     body: body as Record<string, unknown>,
     headers: { "x-idempotency-key": idempotencyKey },
   });
@@ -130,7 +130,30 @@ async function invoke<TRequest, TResponse>(
       error: { code: "empty_response", message: "Edge Function returned no body" },
     };
   }
-  return data;
+  if (
+    typeof data === "object" &&
+    data !== null &&
+    "ok" in data &&
+    typeof (data as { ok?: unknown }).ok === "boolean"
+  ) {
+    return data as EdgeFunctionResult<TResponse>;
+  }
+  return { ok: true, data: data as TResponse };
+}
+
+function toExchangeApiKeyPayload(body: ExchangeConnectionCreateRequest) {
+  return {
+    exchange_name:  body.exchange,
+    account_label:  body.label,
+    api_key:        body.api_key,
+    api_secret:     body.api_secret,
+    passphrase:     body.passphrase,
+    testnet:        body.testnet ?? false,
+  };
+}
+
+function toExchangeAccountPayload(body: { connection_id: string }) {
+  return { exchange_account_id: body.connection_id };
 }
 
 // ─── Bots ────────────────────────────────────────────────────────────────────
@@ -204,16 +227,16 @@ export const paperAccount = {
 // ─── Exchange connections (preferred names; alias of exchangeAccounts.*) ─────
 export const exchangeConnections = {
   create: (body: ExchangeConnectionCreateRequest) =>
-    invoke<ExchangeConnectionCreateRequest, ExchangeConnectionCreateResponse>(
-      "store-exchange-api-key", body,
+    invoke<ReturnType<typeof toExchangeApiKeyPayload>, ExchangeConnectionCreateResponse>(
+      "store-exchange-api-key", toExchangeApiKeyPayload(body),
     ),
   test:   (body: ExchangeConnectionTestRequest) =>
-    invoke<ExchangeConnectionTestRequest, ExchangeConnectionTestResponse>(
-      "exchange-health-check", body,
+    invoke<ReturnType<typeof toExchangeAccountPayload>, ExchangeConnectionTestResponse>(
+      "exchange-health-check", toExchangeAccountPayload(body),
     ),
   delete: (body: ExchangeConnectionDeleteRequest) =>
-    invoke<ExchangeConnectionDeleteRequest, void>(
-      "revoke-exchange-api-key", body,
+    invoke<ReturnType<typeof toExchangeAccountPayload>, void>(
+      "revoke-exchange-api-key", toExchangeAccountPayload(body),
     ),
   toggleLive: (body: ExchangeConnectionToggleLiveRequest) =>
     invoke<ExchangeConnectionToggleLiveRequest, void>(

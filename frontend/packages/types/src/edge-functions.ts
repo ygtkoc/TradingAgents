@@ -97,8 +97,19 @@ export interface ExchangeConnectionCreateRequest  {
   label:      string;
   api_key:    string;
   api_secret: string;
+  passphrase?: string;
+  testnet?: boolean;
 }
-export interface ExchangeConnectionCreateResponse { connection_id: string }
+export interface ExchangeConnectionCreateResponse {
+  exchange_account_id: string;
+  exchange_name: string;
+  account_label: string;
+  connection_status: string;
+  can_read: boolean;
+  can_trade: boolean;
+  testnet: boolean;
+  rotated: boolean;
+}
 
 export interface ExchangeConnectionTestRequest    { connection_id: string }
 export interface ExchangeConnectionTestResponse   {
