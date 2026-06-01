@@ -6,7 +6,6 @@
  * customer-facing 504.
  */
 import { isDemoMode } from "@ta/config/env";
-import { updateSession } from "@ta/supabase/middleware";
 import { NextResponse, type NextRequest } from "next/server";
 
 const PUBLIC_AUTH_PATHS = ["/sign-in", "/sign-up", "/reset-password", "/verify-email"];
@@ -30,29 +29,14 @@ export async function middleware(request: NextRequest) {
     return NextResponse.next({ request: { headers: request.headers } });
   }
 
-  const authResult = await withTimeout(
-    updateSession(request),
-    3500,
-    "customer auth middleware timed out",
-  );
-
-  if (!authResult) {
-    const url = request.nextUrl.clone();
-    url.pathname = "/sign-in";
-    url.searchParams.set("next", `${pathname}${search}`);
-    url.searchParams.set("error", "auth_timeout");
-    return NextResponse.redirect(url);
-  }
-
-  const { response, userId } = authResult;
-  if (!userId) {
+  if (!hasSupabaseAuthCookie(request)) {
     const url = request.nextUrl.clone();
     url.pathname = "/sign-in";
     url.searchParams.set("next", `${pathname}${search}`);
     return NextResponse.redirect(url);
   }
 
-  return response;
+  return NextResponse.next({ request: { headers: request.headers } });
 }
 
 export const config = {
@@ -61,19 +45,8 @@ export const config = {
   ],
 };
 
-async function withTimeout<T>(promise: Promise<T>, ms: number, label: string): Promise<T | null> {
-  let timer: ReturnType<typeof setTimeout> | undefined;
-  try {
-    return await Promise.race([
-      promise,
-      new Promise<null>((resolve) => {
-        timer = setTimeout(() => {
-          console.warn(label);
-          resolve(null);
-        }, ms);
-      }),
-    ]);
-  } finally {
-    if (timer) clearTimeout(timer);
-  }
+function hasSupabaseAuthCookie(request: NextRequest): boolean {
+  return request.cookies
+    .getAll()
+    .some((cookie) => cookie.name.startsWith("sb-") && cookie.name.includes("auth-token"));
 }
