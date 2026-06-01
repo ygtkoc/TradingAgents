@@ -174,6 +174,9 @@ function formatCallbackError(value: string | null) {
   if (!value) return null;
   try {
     const decoded = decodeURIComponent(value);
+    if (decoded === "auth_timeout") {
+      return "Authentication check timed out. Please sign in again.";
+    }
     return decoded === "{}" ? "Sign in failed. Please try again." : decoded;
   } catch {
     return "Sign in failed. Please try again.";

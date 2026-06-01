@@ -1,16 +1,9 @@
 /**
  * Customer app middleware.
  *
- *   1. In DEMO mode → bypass auth entirely (no /sign-in redirect, no JWT
- *      validation). The shell injects a synthetic demo user.
- *   2. Otherwise:
- *      a. Refresh Supabase session on every request (auth.getUser validates JWT).
- *      b. Block unauthenticated users from the (app) shell — redirect to /sign-in.
- *      c. Redirect authenticated users away from public auth flows.
- *      d. Forward Set-Cookie so RSC sees the fresh session.
- *
- * SECURITY: NEVER trust auth.getSession() in middleware (no JWT validation).
- *           updateSession() uses auth.getUser() which validates server-side.
+ * Keep this path fast. Vercel Edge middleware has a strict execution budget;
+ * slow external auth validation should degrade to a controlled redirect, not a
+ * customer-facing 504.
  */
 import { isDemoMode } from "@ta/config/env";
 import { updateSession } from "@ta/supabase/middleware";
@@ -25,27 +18,37 @@ function isPublicAuthPath(pathname: string): boolean {
 }
 
 export async function middleware(request: NextRequest) {
-  // Demo mode short-circuit — no auth checks, no Supabase calls.
   if (isDemoMode) {
     return NextResponse.next({ request: { headers: request.headers } });
   }
 
   const { pathname, search } = request.nextUrl;
-  const { response, userId } = await updateSession(request);
 
-  // Unauthenticated → redirect to /sign-in unless already on a public path.
-  if (!userId && !isPublicAuthPath(pathname)) {
+  // Public auth routes should not make a network call in middleware. Sign-in
+  // itself can handle the client-side auth state after load.
+  if (isPublicAuthPath(pathname)) {
+    return NextResponse.next({ request: { headers: request.headers } });
+  }
+
+  const authResult = await withTimeout(
+    updateSession(request),
+    3500,
+    "customer auth middleware timed out",
+  );
+
+  if (!authResult) {
     const url = request.nextUrl.clone();
     url.pathname = "/sign-in";
     url.searchParams.set("next", `${pathname}${search}`);
+    url.searchParams.set("error", "auth_timeout");
     return NextResponse.redirect(url);
   }
 
-  // Authenticated → bounce away from public auth flow into dashboard.
-  if (userId && isPublicAuthPath(pathname) && !pathname.startsWith(AUTH_CALLBACK_PATH)) {
+  const { response, userId } = authResult;
+  if (!userId) {
     const url = request.nextUrl.clone();
-    url.pathname = "/dashboard";
-    url.search = "";
+    url.pathname = "/sign-in";
+    url.searchParams.set("next", `${pathname}${search}`);
     return NextResponse.redirect(url);
   }
 
@@ -53,5 +56,24 @@ export async function middleware(request: NextRequest) {
 }
 
 export const config = {
-  matcher: ["/((?!_next/static|_next/image|favicon.ico|.*\\.(?:svg|png|jpg|jpeg|gif|webp)$).*)"],
+  matcher: [
+    "/((?!_next/static|_next/image|favicon.ico|robots.txt|manifest.webmanifest|sw.js|.*\\.(?:svg|png|jpg|jpeg|gif|webp|ico)$).*)",
+  ],
 };
+
+async function withTimeout<T>(promise: Promise<T>, ms: number, label: string): Promise<T | null> {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  try {
+    return await Promise.race([
+      promise,
+      new Promise<null>((resolve) => {
+        timer = setTimeout(() => {
+          console.warn(label);
+          resolve(null);
+        }, ms);
+      }),
+    ]);
+  } finally {
+    if (timer) clearTimeout(timer);
+  }
+}
