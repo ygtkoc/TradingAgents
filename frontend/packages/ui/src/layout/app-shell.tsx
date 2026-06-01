@@ -25,6 +25,19 @@ export function AppShell({ sidebar, topBar, banner, children, className }: AppSh
       ) : null}
 
       <div className="relative z-10 flex min-w-0 flex-1 flex-col">
+        {sidebar ? (
+          <details className="group relative z-30 border-b border-border bg-background/95 md:hidden">
+            <summary className="flex h-14 cursor-pointer list-none items-center justify-between px-4 text-sm font-semibold text-foreground marker:hidden">
+              <span>Menu</span>
+              <span className="rounded-md border border-border px-2 py-1 text-[11px] text-muted-foreground group-open:hidden">Open</span>
+              <span className="hidden rounded-md border border-border px-2 py-1 text-[11px] text-muted-foreground group-open:inline">Close</span>
+            </summary>
+            <div className="max-h-[74vh] overflow-y-auto border-t border-border bg-background">
+              {sidebar}
+            </div>
+          </details>
+        ) : null}
+
         {banner ? <div className="w-full">{banner}</div> : null}
 
         {topBar ? (

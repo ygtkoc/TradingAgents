@@ -1,2 +1,25 @@
-/* App-specific overrides only. Shared theme (CSS vars + tailwind base)
-   is imported via JS in `app/layout.tsx` from `@ta/ui/styles.css`. */
+/* Admin-specific contrast overrides. Shared theme is imported from @ta/ui. */
+html.dark,
+body {
+  --background: 218 28% 6%;
+  --foreground: 210 26% 94%;
+  --card: 217 24% 10%;
+  --card-foreground: 210 26% 94%;
+  --muted: 217 18% 15%;
+  --muted-foreground: 215 14% 70%;
+  --secondary: 217 18% 16%;
+  --secondary-foreground: 210 24% 92%;
+  --accent: 214 36% 18%;
+  --accent-foreground: 210 26% 94%;
+  --border: 216 18% 22%;
+  --input: 216 18% 22%;
+  --primary: 213 94% 68%;
+  --primary-foreground: 218 28% 6%;
+  --success: 158 62% 45%;
+  --warning: 38 92% 56%;
+  --destructive: 0 72% 58%;
+}
+
+body {
+  background: hsl(var(--background));
+}

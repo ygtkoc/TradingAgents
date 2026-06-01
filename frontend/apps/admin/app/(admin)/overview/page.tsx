@@ -37,13 +37,13 @@ export default function AdminOverviewPage() {
           Start with pending decisions, reconciliation, and high-severity logs. Trading Brain changes should be treated as platform-wide policy changes because global rules affect every customer bot.
         </CardContent>
       </Card>
-      <Card className="border-cyan-400/20 bg-cyan-400/8">
+      <Card className="border-slate-700 bg-slate-900/60">
         <CardHeader>
           <CardTitle>Global Trading Brain</CardTitle>
           <CardDescription>Central knowledge now lives in the admin plane.</CardDescription>
         </CardHeader>
         <CardContent>
-          <a className="inline-flex rounded-md bg-cyan-300 px-4 py-2 text-sm font-black text-slate-950" href="/trading-brain">
+          <a className="inline-flex rounded-md bg-blue-500 px-4 py-2 text-sm font-semibold text-white hover:bg-blue-400" href="/trading-brain">
             Open knowledge manager
           </a>
         </CardContent>
