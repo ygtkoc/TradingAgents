@@ -70,6 +70,8 @@ export default function TelegramSignalsPage() {
   );
   const [requireStopLoss, setRequireStopLoss] = useState(true);
   const [minConfidence, setMinConfidence] = useState("0.70");
+  const [signalTemplate, setSignalTemplate] = useState("");
+  const [templateThreshold, setTemplateThreshold] = useState("0.65");
 
   const chats = useTelegramChatOptions(accountId);
 
@@ -128,6 +130,8 @@ export default function TelegramSignalsPage() {
       require_stop_loss: requireStopLoss,
       max_signal_age_minutes: 10,
       min_parse_confidence: Number(minConfidence) || 0.7,
+      signal_template: signalTemplate.trim() || null,
+      template_similarity_threshold: Number(templateThreshold) || 0.65,
     });
   };
 
@@ -284,6 +288,24 @@ export default function TelegramSignalsPage() {
               </div>
 
               <div className="space-y-1.5">
+                <Label>Message template</Label>
+                <textarea
+                  value={signalTemplate}
+                  onChange={(e) => setSignalTemplate(e.target.value)}
+                  placeholder={"#BTCUSDT LONG\nEntry: 66200 - 66800\nTP1: 67500\nSL: 64800"}
+                  className="min-h-28 w-full resize-y rounded-md border border-border/65 bg-card/70 px-3 py-2 text-[13px] leading-relaxed text-foreground placeholder:text-muted-foreground/40 transition-all duration-150 hover:border-border focus-visible:border-ring/80 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/50 disabled:cursor-not-allowed disabled:opacity-50"
+                />
+                <p className="text-[11px] leading-relaxed text-muted-foreground">
+                  Incoming messages from this source must look similar to this example before a signal is created.
+                </p>
+              </div>
+
+              <div className="space-y-1.5">
+                <Label>Template match</Label>
+                <Input value={templateThreshold} onChange={(e) => setTemplateThreshold(e.target.value)} />
+              </div>
+
+              <div className="space-y-1.5">
                 <Label>Policy</Label>
                 <Select value={policy} onValueChange={(v) => setPolicy(v as typeof policy)}>
                   <SelectTrigger>
@@ -349,6 +371,11 @@ export default function TelegramSignalsPage() {
                         <div className="mt-0.5 truncate text-xs text-muted-foreground">
                           {source.exchange} · min {source.min_parse_confidence} · SL {source.require_stop_loss ? "required" : "optional"} · cross/max leverage
                         </div>
+                        {source.signal_template ? (
+                          <div className="mt-0.5 truncate text-xs text-muted-foreground">
+                            template match {source.template_similarity_threshold}
+                          </div>
+                        ) : null}
                       </div>
                       <Button
                         size="sm"

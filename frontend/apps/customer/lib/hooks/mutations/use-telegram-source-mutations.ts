@@ -22,6 +22,8 @@ export type TelegramSourceCreateInput = Pick<
   | "require_stop_loss"
   | "max_signal_age_minutes"
   | "min_parse_confidence"
+  | "signal_template"
+  | "template_similarity_threshold"
 >;
 
 const autonomousUrl =
