@@ -65,9 +65,27 @@ async function invoke<TRequest, TResponse>(
       ? crypto.randomUUID()
       : `${Date.now()}-${Math.random().toString(36).slice(2)}`;
 
+  const {
+    data: { session },
+    error: sessionError,
+  } = await sb.auth.getSession();
+
+  if (sessionError || !session?.access_token) {
+    return {
+      ok: false,
+      error: {
+        code: "invalid_session",
+        message: "Invalid or expired session",
+      },
+    };
+  }
+
   const { data, error } = await sb.functions.invoke<EdgeFunctionResult<TResponse> | TResponse>(fn, {
     body: body as Record<string, unknown>,
-    headers: { "x-idempotency-key": idempotencyKey },
+    headers: {
+      Authorization: `Bearer ${session.access_token}`,
+      "x-idempotency-key": idempotencyKey,
+    },
   });
 
   if (error) {
