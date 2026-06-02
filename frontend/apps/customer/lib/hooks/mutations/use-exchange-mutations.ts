@@ -1,6 +1,10 @@
 "use client";
 
 import { edgeFn } from "@ta/supabase/edge-functions";
+import type {
+  EdgeFunctionResult,
+  ExchangeConnectionCreateResponse,
+} from "@ta/types/edge-functions";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 
 import { useCurrentUser } from "../queries/use-current-user";
@@ -13,8 +17,15 @@ export function useExchangeMutations() {
     qc.invalidateQueries({ queryKey: ["exchange-connections", user?.id] });
 
   const create = useMutation({
-    mutationFn: (body: { exchange: string; label: string; api_key: string; api_secret: string }) =>
-      edgeFn.exchangeConnections.create(body),
+    mutationFn: async (body: { exchange: string; label: string; api_key: string; api_secret: string }) => {
+      const response = await fetch("/api/exchange-connections", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(body),
+      });
+      const result = await response.json() as EdgeFunctionResult<ExchangeConnectionCreateResponse>;
+      return result;
+    },
     onSuccess: invalidate,
   });
 
