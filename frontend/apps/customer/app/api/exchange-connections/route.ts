@@ -54,6 +54,21 @@ export async function POST(request: NextRequest) {
 
   const supabase = createServerClient();
   const {
+    data: { user },
+    error: userError,
+  } = await supabase.auth.getUser();
+
+  if (userError || !user) {
+    return NextResponse.json(
+      errorResult(
+        "invalid_session",
+        "Your session could not be refreshed. Please sign in again and retry.",
+      ),
+      { status: 401 },
+    );
+  }
+
+  const {
     data: { session },
     error: sessionError,
   } = await supabase.auth.getSession();
