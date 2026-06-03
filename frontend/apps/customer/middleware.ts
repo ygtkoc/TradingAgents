@@ -6,7 +6,6 @@
  * customer-facing 504.
  */
 import { isDemoMode } from "@ta/config/env";
-import { updateSession } from "@ta/supabase/middleware";
 import { NextResponse, type NextRequest } from "next/server";
 
 const PUBLIC_AUTH_PATHS = ["/sign-in", "/sign-up", "/reset-password", "/verify-email"];
@@ -37,15 +36,7 @@ export async function middleware(request: NextRequest) {
     return NextResponse.redirect(url);
   }
 
-  const { response, userId } = await updateSession(request);
-  if (!userId) {
-    const url = request.nextUrl.clone();
-    url.pathname = "/sign-in";
-    url.searchParams.set("next", `${pathname}${search}`);
-    return NextResponse.redirect(url);
-  }
-
-  return response;
+  return NextResponse.next({ request: { headers: request.headers } });
 }
 
 export const config = {
