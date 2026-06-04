@@ -2,7 +2,7 @@ import pytest
 
 from src.agents.risk import RewardPlanAgent
 from src.db.models import AgentCategory, AgentDefinition, TradeDirection
-from tests.conftest import make_signal
+from tests.conftest import make_signal, make_snapshots_series
 
 
 @pytest.mark.asyncio
@@ -36,6 +36,7 @@ async def test_reward_plan_agent_writes_scaled_plan_to_state():
     assert state["reward_plan"]["selected_reward_r"] <= 3.0
     assert state["reward_plan"]["selected_reward_r"] < 3.0
     assert len(state["reward_plan"]["levels"]) == 3
+    assert [level["close_pct"] for level in state["reward_plan"]["levels"]] == pytest.approx([0.0, 0.5, 0.5])
     assert result.output["take_profit"] == state["reward_plan"]["levels"][-1]["price"]
 
 
@@ -76,3 +77,37 @@ async def test_reward_plan_agent_treats_max_r_as_ceiling_not_target():
 
     assert selected_3r == pytest.approx(2.5)
     assert selected_3r < selected_5r < 5.0
+
+
+@pytest.mark.asyncio
+async def test_reward_plan_agent_resolves_auto_strategy_from_regime():
+    definition = AgentDefinition(
+        id="agent-reward-plan",
+        name="reward_plan_agent",
+        display_name="Reward Plan Agent",
+        agent_type="RewardPlanAgent",
+        category=AgentCategory.RISK,
+        enabled=True,
+        can_veto=True,
+    )
+    agent = RewardPlanAgent(definition)
+    history = [s.model_dump() for s in make_snapshots_series(n=60, base_price=100.0, trend=1.0)]
+    state = {
+        "signal": make_signal(direction=TradeDirection.LONG.value),
+        "market_snapshot": {"close_price": 160.0},
+        "price_history": history,
+        "bot": {
+            "metadata": {"stop_loss_pct": 2.0},
+            "strategy_type": "auto",
+        },
+        "user_settings": {"max_reward_r": 5.0, "min_reward_r": 1.5},
+        "risk_score": 82.0,
+        "atr_pct": 1.0,
+    }
+
+    result = await agent.run(state)
+
+    assert result.veto is False
+    assert state["effective_strategy"] == "momentum"
+    assert result.output["requested_strategy"] == "auto"
+    assert result.output["effective_strategy"] == "momentum"

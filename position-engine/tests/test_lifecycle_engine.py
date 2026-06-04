@@ -360,6 +360,46 @@ class TestPaperCloseStopLoss:
         assert kwargs["realized_pnl"] == pytest.approx(22.0)
         assert kwargs["r_multiple"] == pytest.approx(2.2)
 
+    def test_fast_path_uses_candle_range_for_scaled_final_tp(self):
+        engine = _make_engine()
+        engine._market_data.get_snapshot = AsyncMock(
+            return_value=make_snapshot(
+                close_price=101.2,
+                high_price=103.2,
+                low_price=100.8,
+            )
+        )
+        plan = {
+            "mode": "scaled_take_profit",
+            "levels": [
+                {"level": 1, "label": "TP1", "price": 101.0, "close_pct": 0.00, "status": "pending"},
+                {"level": 2, "label": "TP2", "price": 102.0, "close_pct": 0.50, "status": "pending"},
+                {"level": 3, "label": "TP3", "price": 103.0, "close_pct": 0.50, "status": "pending"},
+            ],
+        }
+        trade = make_trade(
+            mode="paper",
+            direction="long",
+            entry_price=100.0,
+            stop_loss=98.0,
+            take_profit=103.0,
+            quantity=10.0,
+            filled_quantity=10.0,
+            metadata={
+                "reward_plan": plan,
+                "initial_quantity": 10.0,
+                "reserved_on_open": False,
+            },
+        )
+
+        run(engine._run_pipeline(trade))
+
+        engine._lifecycle_repo.mark_closed.assert_awaited_once()
+        engine._security_guard.check.assert_not_called()
+        kwargs = engine._lifecycle_repo.mark_closed.await_args.kwargs
+        assert kwargs["avg_exit_price"] == pytest.approx(103.0)
+        assert kwargs["realized_pnl"] == pytest.approx(30.0)
+
 
 # ── Paper close (CLOSE_TAKE_PROFIT) ───────────────────────────────────────────
 
@@ -383,7 +423,7 @@ class TestPaperCloseTakeProfit:
 
 # ── Emergency close (kill switch) ──────────────────────────────────────────────
 
-    def test_missing_reward_plan_partial_closes_and_moves_stop(self):
+    def test_missing_reward_plan_tp1_moves_stop_without_closing(self):
         engine = _make_engine()
         engine._market_data.get_snapshot = AsyncMock(
             return_value=make_snapshot(close_price=102.1)
@@ -405,11 +445,13 @@ class TestPaperCloseTakeProfit:
 
         engine._lifecycle_repo.mark_closed.assert_not_awaited()
         update = engine._lifecycle_repo.update_trade.await_args.args[1]
-        assert update.filled_quantity == pytest.approx(7.0)
-        assert update.realized_pnl == pytest.approx(6.3)
+        assert update.filled_quantity is None
+        assert update.realized_pnl is None
         assert update.stop_loss == pytest.approx(100.0)
         assert update.take_profit == pytest.approx(103.9)
         assert update.metadata["reward_plan"]["source"] == "position_engine_fallback"
+        assert update.metadata["reward_plan"]["levels"][0]["status"] == "hit"
+        assert update.metadata["reward_plan"]["levels"][0]["filled_quantity"] == pytest.approx(0.0)
 
 
 class TestPaperRiskNormalization:

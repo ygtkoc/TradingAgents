@@ -14,29 +14,30 @@ def _plan():
         "mode": "scaled_take_profit",
         "selected_reward_r": 3.0,
         "levels": [
-            {"level": 1, "label": "TP1", "price": 101.0, "r": 1.0, "close_pct": 0.30, "status": "pending"},
-            {"level": 2, "label": "TP2", "price": 102.0, "r": 2.0, "close_pct": 0.40, "status": "pending"},
-            {"level": 3, "label": "TP3", "price": 103.0, "r": 3.0, "close_pct": 0.30, "status": "pending"},
+            {"level": 1, "label": "TP1", "price": 101.0, "r": 1.0, "close_pct": 0.00, "status": "pending"},
+            {"level": 2, "label": "TP2", "price": 102.0, "r": 2.0, "close_pct": 0.50, "status": "pending"},
+            {"level": 3, "label": "TP3", "price": 103.0, "r": 3.0, "close_pct": 0.50, "status": "pending"},
         ],
     }
 
 
-def test_tp1_triggers_partial_close_for_long():
-    trade = make_trade(entry_price=100.0, quantity=10.0, filled_quantity=10.0, metadata={"reward_plan": _plan()})
+def test_tp1_moves_stop_to_breakeven_without_closing_for_long():
+    trade = make_trade(entry_price=100.0, stop_loss=98.0, quantity=10.0, filled_quantity=10.0, metadata={"reward_plan": _plan()})
     action = check_scaled_take_profit(trade, current_price=101.1)
-    assert action.action_type == ActionType.CLOSE_TAKE_PROFIT
+    assert action.action_type == ActionType.UPDATE_STOP_LOSS
     assert action.metadata["tp_level"] == 1
-    assert action.metadata["close_quantity"] == pytest.approx(3.0)
+    assert action.metadata["close_quantity"] == pytest.approx(0.0)
+    assert action.new_stop_loss == pytest.approx(100.0)
     assert action.metadata["is_final_tp"] is False
 
 
 def test_waits_for_next_pending_level():
     plan = _plan()
     plan["levels"][0]["status"] = "hit"
-    trade = make_trade(entry_price=100.0, quantity=10.0, filled_quantity=7.0, metadata={"reward_plan": plan})
+    trade = make_trade(entry_price=100.0, quantity=10.0, filled_quantity=10.0, metadata={"reward_plan": plan})
     action = check_scaled_take_profit(trade, current_price=102.1)
     assert action.metadata["tp_level"] == 2
-    assert action.metadata["close_quantity"] == pytest.approx(2.8)
+    assert action.metadata["close_quantity"] == pytest.approx(5.0)
 
 
 def test_final_level_closes_remaining_quantity():
@@ -47,6 +48,28 @@ def test_final_level_closes_remaining_quantity():
     action = check_scaled_take_profit(trade, current_price=103.1)
     assert action.metadata["tp_level"] == 3
     assert action.metadata["close_quantity"] == pytest.approx(4.2)
+    assert action.metadata["is_final_tp"] is True
+
+
+def test_multi_level_candle_range_closes_through_highest_hit_level():
+    trade = make_trade(entry_price=100.0, quantity=10.0, filled_quantity=10.0, metadata={"reward_plan": _plan()})
+    action = check_scaled_take_profit(trade, current_price=101.2, high_price=102.2)
+
+    assert action.action_type == ActionType.CLOSE_TAKE_PROFIT
+    assert action.metadata["tp_level"] == 2
+    assert action.metadata["tp_levels_hit"] == [1, 2]
+    assert action.metadata["close_quantity"] == pytest.approx(5.0)
+    assert action.metadata["is_final_tp"] is False
+
+
+def test_multi_level_candle_range_closes_final_level():
+    trade = make_trade(entry_price=100.0, quantity=10.0, filled_quantity=10.0, metadata={"reward_plan": _plan()})
+    action = check_scaled_take_profit(trade, current_price=101.2, high_price=103.2)
+
+    assert action.action_type == ActionType.CLOSE_TAKE_PROFIT
+    assert action.metadata["tp_level"] == 3
+    assert action.metadata["tp_levels_hit"] == [1, 2, 3]
+    assert action.metadata["close_quantity"] == pytest.approx(10.0)
     assert action.metadata["is_final_tp"] is True
 
 
@@ -74,7 +97,7 @@ def test_short_tp1_triggers_when_price_falls():
         metadata={"reward_plan": plan},
     )
     action = check_scaled_take_profit(trade, current_price=98.9)
-    assert action.action_type == ActionType.CLOSE_TAKE_PROFIT
+    assert action.action_type == ActionType.UPDATE_STOP_LOSS
     assert action.metadata["tp_level"] == 1
 
 
@@ -90,10 +113,10 @@ def test_missing_plan_falls_back_to_risk_reward_ratio():
 
     action = check_scaled_take_profit(trade, current_price=102.1)
 
-    assert action.action_type == ActionType.CLOSE_TAKE_PROFIT
+    assert action.action_type == ActionType.UPDATE_STOP_LOSS
     assert action.metadata["tp_level"] == 1
     assert action.metadata["tp_price"] == pytest.approx(102.0)
-    assert action.metadata["close_quantity"] == pytest.approx(3.0)
+    assert action.metadata["close_quantity"] == pytest.approx(0.0)
     assert action.metadata["reward_plan"]["source"] == "position_engine_fallback"
 
 
@@ -108,5 +131,5 @@ def test_missing_plan_can_derive_r_from_final_take_profit():
 
     action = check_scaled_take_profit(trade, current_price=102.1)
 
-    assert action.action_type == ActionType.CLOSE_TAKE_PROFIT
+    assert action.action_type == ActionType.UPDATE_STOP_LOSS
     assert action.metadata["tp_r"] == pytest.approx(1.0)

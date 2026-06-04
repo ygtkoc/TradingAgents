@@ -15,7 +15,11 @@ def check_scaled_take_profit(
     high_price: float | None = None,
     low_price: float | None = None,
 ) -> LifecycleAction:
-    """Return a partial/full take-profit action for the next pending TP level."""
+    """Return the next scaled TP lifecycle action.
+
+    TP1 is a protection milestone only: move stop to breakeven, do not close.
+    TP2 closes half of the current position. TP3 closes all remaining size.
+    """
     plan = _plan(trade)
     levels = plan.get("levels") if isinstance(plan, dict) else None
     if not levels:
@@ -23,6 +27,7 @@ def check_scaled_take_profit(
     high = high_price if high_price and high_price > 0 else current_price
     low = low_price if low_price and low_price > 0 else current_price
 
+    pending_hits: list[dict[str, Any]] = []
     for level in sorted(levels, key=lambda item: int(item.get("level", 0))):
         if str(level.get("status") or "pending") != "pending":
             continue
@@ -33,16 +38,66 @@ def check_scaled_take_profit(
         range_hit = high >= price if trade.is_long else low <= price
         hit = current_hit or range_hit
         if not hit:
+            if pending_hits:
+                break
             return hold()
+        pending_hits.append({
+            "level": level,
+            "price": price,
+            "current_hit": current_hit,
+            "range_hit": range_hit,
+        })
 
+    if pending_hits:
+        last_hit = pending_hits[-1]
+        level = last_hit["level"]
+        price = last_hit["price"]
         level_no = int(level.get("level") or 1)
-        is_final = level_no >= max(int(item.get("level", 0) or 0) for item in levels)
-        close_pct = 1.0 if is_final else _close_pct(level)
+        max_level = max(int(item.get("level", 0) or 0) for item in levels)
+        is_final = level_no >= max_level
+        close_pct = 1.0 if is_final else _close_pct_for_level(level_no)
         close_qty = trade.effective_quantity if is_final else trade.effective_quantity * close_pct
         comparator = ">=" if trade.is_long else "<="
-        trigger_source = "current_price" if current_hit else "candle_range"
-        trigger_price = current_price if current_hit else price
-        trigger_observed_price = current_price if current_hit else (high if trade.is_long else low)
+        trigger_source = "current_price" if last_hit["current_hit"] else "candle_range"
+        trigger_price = current_price if last_hit["current_hit"] else price
+        trigger_observed_price = current_price if last_hit["current_hit"] else (high if trade.is_long else low)
+        hit_levels = [
+            int(hit["level"].get("level") or 1)
+            for hit in pending_hits
+        ]
+
+        if level_no <= 1:
+            new_stop = next_stop_after_tp(trade, plan, level_no)
+            return LifecycleAction(
+                action_type=ActionType.UPDATE_STOP_LOSS,
+                reason=(
+                    f"Scaled take-profit {level.get('label') or level_no} reached: "
+                    f"price {trigger_observed_price} {comparator} target {price}; "
+                    "moving stop-loss to breakeven"
+                ),
+                new_stop_loss=new_stop,
+                metadata={
+                    "scaled_take_profit": True,
+                    "tp_protection_only": True,
+                    "tp_level": level_no,
+                    "tp_label": level.get("label") or f"TP{level_no}",
+                    "tp_levels_hit": hit_levels,
+                    "tp_price": price,
+                    "tp_r": _float(level.get("r")),
+                    "close_pct": 0.0,
+                    "close_quantity": 0.0,
+                    "is_final_tp": False,
+                    "current_price": current_price,
+                    "trigger_price": trigger_price,
+                    "trigger_observed_price": trigger_observed_price,
+                    "trigger_source": trigger_source,
+                    "high_price": high,
+                    "low_price": low,
+                    "direction": trade.direction,
+                    "reward_plan": plan,
+                    "new_stop_loss": new_stop,
+                },
+            )
 
         return LifecycleAction(
             action_type=ActionType.CLOSE_TAKE_PROFIT,
@@ -55,6 +110,7 @@ def check_scaled_take_profit(
                 "scaled_take_profit": True,
                 "tp_level": level_no,
                 "tp_label": level.get("label") or f"TP{level_no}",
+                "tp_levels_hit": hit_levels,
                 "tp_price": price,
                 "tp_r": _float(level.get("r")),
                 "close_pct": close_pct,
@@ -174,18 +230,13 @@ def _r_levels(selected_r: float) -> list[float]:
 
 
 def _close_pcts(selected_r: float) -> list[float]:
-    if selected_r <= 2.0:
-        return [0.40, 0.35, 0.25]
-    return [0.30, 0.40, 0.30]
+    return [0.0, 0.50, 0.50]
 
 
-def _close_pct(level: dict[str, Any]) -> float:
-    value = _float(level.get("close_pct"))
-    if value is None:
+def _close_pct_for_level(level_no: int) -> float:
+    if level_no <= 1:
         return 0.0
-    if value > 1:
-        value = value / 100.0
-    return max(0.0, min(1.0, value))
+    return 0.50
 
 
 def _float(value: Any) -> float | None:

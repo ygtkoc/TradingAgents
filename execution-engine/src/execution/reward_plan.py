@@ -118,11 +118,7 @@ def _r_levels(selected_r: float) -> list[float]:
 
 
 def _close_pcts(profile: str, selected_r: float) -> list[float]:
-    if profile == "conservative" or selected_r <= 2.0:
-        return [0.40, 0.35, 0.25]
-    if profile == "runner":
-        return [0.25, 0.30, 0.45]
-    return [0.30, 0.40, 0.30]
+    return [0.0, 0.50, 0.50]
 
 
 def _as_float(value: Any) -> float | None:

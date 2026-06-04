@@ -460,8 +460,10 @@ class LifecycleEngine:
         # same current price for this lifecycle cycle.
         pnl = calculate_unrealized_pnl(trade, current_price)
 
-        high_price = market_snapshot.high_price if market_snapshot else current_price
-        low_price = market_snapshot.low_price if market_snapshot else current_price
+        high_price, low_price = self._resolve_price_range(
+            current_price=current_price,
+            market_snapshot=market_snapshot,
+        )
 
         # Stop-loss
         actions.append(
@@ -514,27 +516,55 @@ class LifecycleEngine:
         market_snapshot: Optional[MarketSnapshot],
     ) -> LifecycleAction:
         """Evaluate stop-loss and take-profit before slower advisory checks."""
+        high_price, low_price = self._resolve_price_range(
+            current_price=current_price,
+            market_snapshot=market_snapshot,
+        )
         actions: list[LifecycleAction] = [
             check_stop_loss(
                 trade,
                 current_price,
-                high_price=current_price,
-                low_price=current_price,
+                high_price=high_price,
+                low_price=low_price,
             ),
             check_scaled_take_profit(
                 trade,
                 current_price,
-                high_price=current_price,
-                low_price=current_price,
+                high_price=high_price,
+                low_price=low_price,
             ),
             check_take_profit(
                 trade,
                 current_price,
-                high_price=current_price,
-                low_price=current_price,
+                high_price=high_price,
+                low_price=low_price,
             ),
         ]
         return highest_priority(actions)
+
+    def _resolve_price_range(
+        self,
+        *,
+        current_price: float,
+        market_snapshot: Optional[MarketSnapshot],
+    ) -> tuple[float, float]:
+        if market_snapshot is None or current_price <= 0:
+            return current_price, current_price
+        high = market_snapshot.high_price
+        low = market_snapshot.low_price
+        if low <= 0 or high <= 0 or high < low:
+            return current_price, current_price
+        # Guard against stale/mismatched snapshots. A 1m candle range multiple
+        # of the live/current price is more likely bad data than a tradable wick.
+        if high > current_price * 5 or low < current_price / 5:
+            log.warning(
+                "market_data.snapshot_range_rejected",
+                current_price=current_price,
+                high_price=high,
+                low_price=low,
+            )
+            return current_price, current_price
+        return max(high, current_price), min(low, current_price)
 
     async def _apply_action(
         self,
@@ -557,6 +587,9 @@ class LifecycleEngine:
 
         elif atype == ActionType.UPDATE_TRAILING_STOP:
             await self._apply_update_trailing_stop(trade, action)
+
+        elif atype == ActionType.UPDATE_STOP_LOSS:
+            await self._apply_update_stop_loss(trade, action)
 
         elif atype == ActionType.PAUSE_MONITORING:
             await self._apply_pause(trade, action)
@@ -637,6 +670,80 @@ class LifecycleEngine:
             paper_account = getattr(self, "_paper_account", None)
             if paper_account is not None:
                 await paper_account.sync_unrealized(user_id=trade.user_id)
+        await self._lifecycle_repo.release_claim(trade.id)
+
+    async def _apply_update_stop_loss(
+        self, trade: Trade, action: LifecycleAction
+    ) -> None:
+        new_stop = action.new_stop_loss
+        if new_stop is None:
+            await self._lifecycle_repo.release_claim(trade.id)
+            return
+
+        level_no = int(action.metadata.get("tp_level") or 1)
+        hit_levels = [
+            int(level)
+            for level in (action.metadata.get("tp_levels_hit") or [level_no])
+        ]
+        hit_at = utcnow_iso()
+        old_plan = action.metadata.get("reward_plan") or trade.metadata.get("reward_plan") or {}
+        new_plan = old_plan
+        for hit_level in hit_levels:
+            new_plan = mark_level_hit(
+                new_plan,
+                hit_level,
+                qty=0.0,
+                pnl=0.0,
+                hit_at=hit_at,
+            )
+
+        next_take_profit = next_take_profit_after_tp(new_plan, level_no)
+        metadata = {
+            **trade.metadata,
+            "reward_plan": new_plan,
+            "tp_plan": new_plan.get("levels", []) if isinstance(new_plan, dict) else [],
+            "scaled_tp_last_hit": level_no,
+            "scaled_tp_stop_moved_at": hit_at,
+            "scaled_tp_stop_moved_to": new_stop,
+        }
+
+        await self._lifecycle_repo.update_trade(
+            trade.id,
+            TradeUpdateLifecycle(
+                lifecycle_status="idle",
+                stop_loss=new_stop,
+                take_profit=next_take_profit,
+                metadata=metadata,
+                unrealized_pnl=action.unrealized_pnl,
+            ),
+        )
+
+        await self._event_repo.create(TradeEventInsert(
+            trade_id=trade.id,
+            bot_id=trade.bot_id,
+            user_id=trade.user_id,
+            event_type="take_profit_stop_moved",
+            details={
+                "tp_level": level_no,
+                "tp_levels_hit": hit_levels,
+                "new_stop_loss": new_stop,
+                "next_take_profit": next_take_profit,
+                "reward_plan": new_plan,
+                "reason": action.reason,
+            },
+        ))
+
+        await self._risk_log.create(RiskLogInsert(
+            user_id=trade.user_id,
+            bot_id=trade.bot_id,
+            trade_id=trade.id,
+            risk_type="take_profit_stop_moved",
+            severity=SeverityLevel.INFO.value,
+            triggered=True,
+            message=action.reason[:400],
+            metadata={"tp_level": level_no, "new_stop_loss": new_stop},
+        ))
+
         await self._lifecycle_repo.release_claim(trade.id)
 
     async def _apply_pause(self, trade: Trade, action: LifecycleAction) -> None:
@@ -1156,9 +1263,24 @@ class LifecycleEngine:
         realized_pnl = _pnl_for_quantity(trade, close_price, close_qty)
         remaining_qty = max(0.0, qty - close_qty)
         level_no = int(action.metadata.get("tp_level") or 1)
+        hit_levels = [
+            int(level)
+            for level in (action.metadata.get("tp_levels_hit") or [level_no])
+        ]
         hit_at = utcnow_iso()
         old_plan = action.metadata.get("reward_plan") or trade.metadata.get("reward_plan") or {}
-        new_plan = mark_level_hit(old_plan, level_no, qty=close_qty, pnl=realized_pnl, hit_at=hit_at)
+        new_plan = old_plan
+        close_hit_levels = [level for level in hit_levels if level >= 2]
+        per_level_qty = close_qty / len(close_hit_levels) if close_hit_levels else close_qty
+        per_level_pnl = realized_pnl / len(close_hit_levels) if close_hit_levels else realized_pnl
+        for hit_level in hit_levels:
+            new_plan = mark_level_hit(
+                new_plan,
+                hit_level,
+                qty=per_level_qty if hit_level >= 2 else 0.0,
+                pnl=per_level_pnl if hit_level >= 2 else 0.0,
+                hit_at=hit_at,
+            )
         new_stop = next_stop_after_tp(trade, new_plan, level_no)
         next_take_profit = next_take_profit_after_tp(new_plan, level_no)
         cumulative_realized = float(trade.realized_pnl or 0.0) + realized_pnl
@@ -1184,6 +1306,7 @@ class LifecycleEngine:
                 *(trade.metadata.get("partial_close_history") or []),
                 {
                     "tp_level": level_no,
+                    "tp_levels_hit": hit_levels,
                     "price": close_price,
                     "quantity": close_qty,
                     "realized_pnl": realized_pnl,
@@ -1234,6 +1357,7 @@ class LifecycleEngine:
             event_type="take_profit_partial_closed",
             details={
                 "tp_level": level_no,
+                "tp_levels_hit": hit_levels,
                 "close_price": close_price,
                 "closed_quantity": close_qty,
                 "remaining_quantity": remaining_qty,

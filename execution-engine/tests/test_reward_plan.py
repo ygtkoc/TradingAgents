@@ -14,6 +14,7 @@ def test_build_reward_plan_creates_three_ordered_long_targets():
     assert plan["selected_reward_r"] == pytest.approx(3.0)
     assert [level["label"] for level in plan["levels"]] == ["TP1", "TP2", "TP3"]
     assert [level["price"] for level in plan["levels"]] == pytest.approx([102.0, 103.9, 106.0])
+    assert [level["close_pct"] for level in plan["levels"]] == pytest.approx([0.0, 0.5, 0.5])
     assert sum(level["close_pct"] for level in plan["levels"]) == pytest.approx(1.0)
 
 

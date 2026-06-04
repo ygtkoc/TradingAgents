@@ -8,10 +8,11 @@ Priority ordering (highest wins when multiple triggers fire simultaneously):
   4. CLOSE_TRAILING_STOP     — trailing stop triggered
   5. MARK_NEEDS_RECONCILIATION
   6. PAUSE_MONITORING
-  7. UPDATE_TRAILING_STOP    — update price but don't close
-  8. UPDATE_PNL              — just recalculate unrealized P&L
-  9. HOLD                    — nothing to do
-  10. ERROR                  — internal error (lowest — error path)
+  7. UPDATE_STOP_LOSS        — move stop-loss but don't close
+  8. UPDATE_TRAILING_STOP    — update price but don't close
+  9. UPDATE_PNL              — just recalculate unrealized P&L
+  10. HOLD                   — nothing to do
+  11. ERROR                  — internal error (lowest — error path)
 """
 from __future__ import annotations
 
@@ -29,12 +30,13 @@ class ActionType(IntEnum):
     HOLD                     = 1
     UPDATE_PNL               = 2
     UPDATE_TRAILING_STOP     = 3
-    PAUSE_MONITORING         = 4
-    MARK_NEEDS_RECONCILIATION = 5
-    CLOSE_TRAILING_STOP      = 6
-    CLOSE_TAKE_PROFIT        = 7
-    CLOSE_STOP_LOSS          = 8
-    CLOSE_EMERGENCY          = 9
+    UPDATE_STOP_LOSS         = 4
+    PAUSE_MONITORING         = 5
+    MARK_NEEDS_RECONCILIATION = 6
+    CLOSE_TRAILING_STOP      = 7
+    CLOSE_TAKE_PROFIT        = 8
+    CLOSE_STOP_LOSS          = 9
+    CLOSE_EMERGENCY          = 10
 
 
 @dataclass
@@ -49,6 +51,7 @@ class LifecycleAction:
     metadata:        dict[str, Any]   = field(default_factory=dict)
     close_price:     Optional[float]  = None   # price at which to close (if closing)
     new_trailing_stop: Optional[float] = None  # updated trailing stop price
+    new_stop_loss:      Optional[float] = None  # updated hard stop-loss
     new_highest_seen:  Optional[float] = None  # updated highest price for longs
     new_lowest_seen:   Optional[float] = None  # updated lowest price for shorts
     unrealized_pnl:    Optional[float] = None  # computed P&L for UPDATE_PNL
