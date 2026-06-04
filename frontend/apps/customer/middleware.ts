@@ -10,9 +10,11 @@ import { NextResponse, type NextRequest } from "next/server";
 
 const PUBLIC_AUTH_PATHS = ["/sign-in", "/sign-up", "/reset-password", "/verify-email"];
 const AUTH_CALLBACK_PATH = "/auth/callback";
+const AUTH_CLEAR_SESSION_PATH = "/auth/clear-session";
 
 function isPublicAuthPath(pathname: string): boolean {
   if (pathname.startsWith(AUTH_CALLBACK_PATH)) return true;
+  if (pathname.startsWith(AUTH_CLEAR_SESSION_PATH)) return true;
   return PUBLIC_AUTH_PATHS.some((p) => pathname === p || pathname.startsWith(`${p}/`));
 }
 
