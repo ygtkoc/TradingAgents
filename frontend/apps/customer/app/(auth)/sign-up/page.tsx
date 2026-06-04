@@ -32,6 +32,12 @@ function scorePassword(pw: string): Strength {
   return                          { score: 4, label: "Strong" };
 }
 
+function authCallbackUrl() {
+  const configured = process.env.NEXT_PUBLIC_CUSTOMER_URL?.trim().replace(/\/$/, "");
+  const origin = configured || window.location.origin;
+  return `${origin}/auth/callback`;
+}
+
 export default function SignUpPage() {
   const router = useRouter();
 
@@ -69,7 +75,7 @@ export default function SignUpPage() {
       options: {
         data: { full_name: fullName.trim() },
         // Email confirmation links will redirect through here.
-        emailRedirectTo: `${window.location.origin}/auth/callback`,
+        emailRedirectTo: authCallbackUrl(),
       },
     });
     if (err) {
