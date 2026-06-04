@@ -28,11 +28,25 @@ export default async function AppShellLayout({ children }: { children: ReactNode
     email = DEMO_USER.email;
   } else {
     const supabase = createServerClient();
-    const { data: { user } } = await supabase.auth.getUser();
-    if (!user) {
-      redirect("/sign-in");
+    let userEmail: string | null = null;
+    let redirectError: "session_expired" | "auth_retryable" | null = null;
+
+    try {
+      const { data: { user }, error } = await supabase.auth.getUser();
+      if (error || !user) {
+        redirectError = "session_expired";
+      } else {
+        userEmail = user.email ?? null;
+      }
+    } catch {
+      redirectError = "auth_retryable";
     }
-    email = user.email ?? null;
+
+    if (redirectError) {
+      redirect(`/auth/clear-session?next=/dashboard&error=${redirectError}`);
+    }
+
+    email = userEmail;
   }
 
   return (

@@ -179,21 +179,30 @@ function formatCallbackError(value: string | null) {
     if (decoded === "auth_timeout") {
       return "Authentication check timed out. Please sign in again.";
     }
-    return decoded === "{}" ? "Sign in failed. Please try again." : decoded;
+    if (decoded === "session_expired") {
+      return "Your session expired. Please sign in again.";
+    }
+    if (decoded === "auth_retryable") {
+      return "Authentication service could not be reached. Please sign in again.";
+    }
+    if (decoded === "missing_code" || decoded === "{}" || decoded.startsWith("AuthRetryableFetchError")) {
+      return "Sign in failed. Please try again.";
+    }
+    return decoded;
   } catch {
     return "Sign in failed. Please try again.";
   }
 }
 
 function formatAuthError(error: unknown) {
-  if (error instanceof Error && error.message) {
+  if (error instanceof Error && error.message && error.message !== "{}") {
     return error.message;
   }
 
   if (typeof error === "object" && error !== null) {
     const maybeMessage = (error as { message?: unknown; error_description?: unknown }).message
       ?? (error as { message?: unknown; error_description?: unknown }).error_description;
-    if (typeof maybeMessage === "string" && maybeMessage.trim()) {
+    if (typeof maybeMessage === "string" && maybeMessage.trim() && maybeMessage !== "{}") {
       return maybeMessage;
     }
   }
