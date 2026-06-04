@@ -15,7 +15,9 @@ function SignInForm() {
   const searchParams = useSearchParams();
   const requestedNext = searchParams.get("next");
   const callbackError = searchParams.get("error");
-  const next          = requestedNext?.startsWith("/") && !requestedNext.startsWith("//")
+  const next          = requestedNext === "/"
+    ? "/dashboard"
+    : requestedNext?.startsWith("/") && !requestedNext.startsWith("//")
     ? requestedNext
     : "/dashboard";
 

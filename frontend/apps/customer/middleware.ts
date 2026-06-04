@@ -22,6 +22,14 @@ export async function middleware(request: NextRequest) {
   }
 
   const { pathname, search } = request.nextUrl;
+  if (pathname === "/") {
+    const url = request.nextUrl.clone();
+    url.pathname = hasSupabaseAuthCookie(request) ? "/dashboard" : "/sign-in";
+    if (!hasSupabaseAuthCookie(request)) {
+      url.searchParams.set("next", "/dashboard");
+    }
+    return NextResponse.redirect(url);
+  }
 
   // Public auth routes should not make a network call in middleware. Sign-in
   // itself can handle the client-side auth state after load.
