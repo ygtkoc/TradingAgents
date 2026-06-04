@@ -292,6 +292,8 @@ export interface TelegramSignalSource {
   require_stop_loss:      boolean;
   max_signal_age_minutes: number;
   min_parse_confidence:   number;
+  signal_template:        string | null;
+  template_similarity_threshold: number;
   max_leverage:           number | null;
   default_leverage:       number | null;
   symbol_allowlist:       string[];
