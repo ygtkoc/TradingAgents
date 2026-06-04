@@ -17,6 +17,7 @@ Atomic claim protocol (two-phase):
 from __future__ import annotations
 
 import asyncio
+from datetime import timezone
 from typing import Optional
 
 from src.config import settings
@@ -437,6 +438,50 @@ class TradeRepository:
             )
         result = await _run(_select)
         return Trade.model_validate(result.data) if result.data else None
+
+    async def realized_loss_today_usd(
+        self,
+        *,
+        user_id: str,
+        mode: Optional[str] = None,
+    ) -> float:
+        """
+        Return today's net realized loss for a user's account.
+
+        Positive realized PnL offsets losses. The risk guard only needs the loss
+        magnitude, so profitable or flat days return 0.
+        """
+        from src.utils.time import utcnow
+
+        start = utcnow().astimezone(timezone.utc).replace(
+            hour=0,
+            minute=0,
+            second=0,
+            microsecond=0,
+        )
+
+        def _select():
+            query = (
+                self._client.table("trades")
+                .select("realized_pnl,closed_at")
+                .eq("user_id", user_id)
+                .eq("status", "closed")
+                .gte("closed_at", start.isoformat())
+                .limit(1000)
+            )
+            if mode:
+                query = query.eq("mode", mode)
+            return query.execute()
+
+        result = await _run(_select)
+        net_pnl = 0.0
+        for row in result.data or []:
+            value = row.get("realized_pnl")
+            try:
+                net_pnl += float(value or 0.0)
+            except (TypeError, ValueError):
+                continue
+        return abs(net_pnl) if net_pnl < 0 else 0.0
 
 
 # ── Trade Event Repository ────────────────────────────────────────────────────
