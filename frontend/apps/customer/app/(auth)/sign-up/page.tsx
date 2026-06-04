@@ -53,6 +53,25 @@ export default function SignUpPage() {
   const strength = useMemo(() => scorePassword(password), [password]);
   const passwordsMatch = !confirm || password === confirm;
 
+  const createAccountRows = async (userId: string) => {
+    try {
+      await supabase.from("user_settings").insert({
+        user_id:                        userId,
+        trading_enabled:                true,
+        real_trading_enabled:           false,
+        real_trading_allowed:           false,
+        real_trading_requires_approval: true,
+      });
+    } catch { /* table or RLS may not exist yet; ignore for scaffold */ }
+
+    try {
+      await supabase.from("profiles").insert({
+        id:        userId,
+        full_name: fullName.trim(),
+      });
+    } catch { /* profile table optional */ }
+  };
+
   const onSubmit = async (e: FormEvent) => {
     e.preventDefault();
     setError(null);
@@ -88,22 +107,7 @@ export default function SignUpPage() {
     if (data.session && data.user) {
       // Best-effort: create user_settings + profile rows. RLS scopes inserts
       // to the authed user. NOTE: trades/decisions/etc. are still off-limits.
-      try {
-        await supabase.from("user_settings").insert({
-          user_id:                        data.user.id,
-          trading_enabled:                true,
-          real_trading_enabled:           false,
-          real_trading_allowed:           false,
-          real_trading_requires_approval: true,
-        });
-      } catch { /* table or RLS may not exist yet; ignore for scaffold */ }
-
-      try {
-        await supabase.from("profiles").insert({
-          id:        data.user.id,
-          full_name: fullName.trim(),
-        });
-      } catch { /* profile table optional */ }
+      await createAccountRows(data.user.id);
 
       setBusy(false);
       router.push("/dashboard");
@@ -111,7 +115,19 @@ export default function SignUpPage() {
       return;
     }
 
-    // Email confirmation flow — show inline confirmation copy.
+    // If signup did not return a session, autoconfirm may still allow login.
+    const { data: signInData, error: signInError } = await supabase.auth.signInWithPassword({
+      email,
+      password,
+    });
+    if (!signInError && signInData.session && signInData.user) {
+      await createAccountRows(signInData.user.id);
+      setBusy(false);
+      router.push("/dashboard");
+      router.refresh();
+      return;
+    }
+
     setBusy(false);
     setInfo("Check your inbox to confirm your email. You can close this tab.");
   };
